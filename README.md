@@ -29,4 +29,5 @@ In addition to traditional methods, we implement a transformer-based model for s
   ```math
   \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
 
-<img width="413" alt="Skærmbillede 2024-04-05 kl  19 33 40" src="https://github.com/josephmargaryan/NLP/assets/126695370/e1ebf5b2-8159-4434-a3b1-3e8d2383e44a">
+<img width="414" alt="Skærmbillede 2024-04-05 kl  19 34 40" src="https://github.com/josephmargaryan/NLP/assets/126695370/ccca2673-cf28-4172-b9ef-6a244af30948">
+
