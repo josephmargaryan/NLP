@@ -6,15 +6,24 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 class HeadTailInference:
-    def __init__(self, model_path, tokenizer_name, device):
+    def __init__(self, model_path, tokenizer_name, device, path_to_data, label_encoder_path):
         self.model = AutoModelForSequenceClassification.from_pretrained(tokenizer_name)
         self.model.load_state_dict(torch.load(model_path))
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.device = device
         self.model.to(self.device)
         self.model.eval()
+        self.path_to_data = path_to_data
+        with open(label_encoder_path, 'rb') as f:
+            self.label_encoder = pickle.load(f)
 
+    def load_data(self):
+        df = pd.read_csv(self.path_to_data)
+        df["y"] = self.label_encoder.transform(df["CLASSIFICATION"])
+        return df
+        
     def preprocess_data(self, df):
+        df = self.load_data()
         def clean_text(text):
             text = text.lower()
             text = re.sub(r"http\S+|www\S+", '', text, flags=re.MULTILINE)
