@@ -11,6 +11,7 @@ from tqdm import tqdm
 import os
 from sklearn.preprocessing import LabelEncoder
 import pickle
+from sklearn.metrics import f1_score, accuracy_score, classification_report
 
 class Head_Tail_Training:
     def __init__(self, model, tokenizer, path_to_data, device):
@@ -21,38 +22,41 @@ class Head_Tail_Training:
 
     def load_data(self):
         """
-        Takes the file path with the parquet files, concatenates them, and removes documents with non-manual classification.
+        Traverses all folders and subfolders within the specified parent directory, excluding 'p-drive-structured',
+        and concatenates all Parquet files into a single DataFrame.
         """
-        out_folder = self.path_to_data
+        parent_folder = self.path_to_data
         regex = ".parquet"
 
-        folders = os.listdir(out_folder)
         dataframes = []
-        for folder in folders:
-            folder_path = os.path.join(out_folder, folder)
-            if os.path.isdir(folder_path):
-                files = os.listdir(folder_path)
-                for file in tqdm(files, desc=f"Processing files in {folder}", unit="file"):
-                    if file.endswith(regex):
-                        file_path = os.path.join(folder_path, file)
-                        df = pd.read_parquet(file_path)
-                        dataframes.append(df)
 
-        final_df = pd.concat(dataframes, axis=0) 
-        final_df.reset_index(drop=True, inplace=True)
-        df_filtered = final_df.loc[~final_df["text"].isna(), :]
-        df_filtered = df_filtered[df_filtered["text"].apply(lambda x: len(str(x)) > 10)]
-        df_filtered = df_filtered.loc[~df_filtered["CLASSIFICATION"].isna(), :]
-        print(f"The number of total samples: {len(df_filtered)})")
-        df = df_filtered[["text", "CLASSIFICATION"]]
-        df = df.rename(columns={"text": "x"})
-        le = LabelEncoder()
-        df["y"] = le.fit_transform(df["CLASSIFICATION"])
-        with open('label_encoder.pkl', 'wb') as f:
-            pickle.dump(le, f)
+        for root, dirs, files in os.walk(parent_folder):
 
-        return df
-    
+            if 'p-drive-structured' in root:
+                continue
+
+            for file in tqdm(files, desc=f"Processing files in {root}", unit="file"):
+                if file.endswith(regex):
+                    file_path = os.path.join(root, file)
+                    df = pd.read_parquet(file_path)
+                    dataframes.append(df)
+
+        if dataframes:
+            final_df = pd.concat(dataframes, axis=0) 
+            final_df.reset_index(drop=True, inplace=True)
+            df = final_df.loc[~final_df["text"].isna()]
+            df = df.loc[~df["classification__v"].isna()]
+            le = LabelEncoder()
+            df["y"] = le.fit_transform(df["classification__v"])
+            df["x"] = df["text"]
+            with open("label_encoder.pkl", "wb") as f:
+                pickle.dump(le, f)
+            return df
+        else:
+            print("No Parquet files found.")
+            return pd.DataFrame() 
+
+  
     def preprocess_data(self):
         df = self.load_data()
 
@@ -121,12 +125,17 @@ class Head_Tail_Training:
         correct = (preds_max == labels).sum().item()
         return correct / labels.size(0)
 
+    def f1_score(self, preds, labels):
+        _, preds_max = torch.max(preds, 1)
+        return f1_score(labels.cpu().numpy(), preds_max.cpu().numpy(), average='weighted')
+
     def train(self, num_epochs, lr=2e-5, patience=5, max_grad_norm=1.0):
         train_loader, val_loader = self.create_dataloader()
         self.model.to(self.device)
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr)
         train_losses = []
         val_losses = []
+        val_f1_scores = []
         val_accuracies = []
         best_model_state = None
         counter = 0
@@ -146,15 +155,14 @@ class Head_Tail_Training:
                 loss.backward()
                 
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
-
                 optimizer.step()
                 avg_train_loss.append(loss.item())
 
             avg_train_loss = np.mean(avg_train_loss)
             
             avg_val_loss = []
-            total_correct = 0
-            total_samples = 0
+            all_preds = []
+            all_labels = []
             self.model.eval()
             for j, (input_ids, attention_mask, labels) in enumerate(tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")):
                 input_ids = input_ids.to(self.device)
@@ -167,12 +175,17 @@ class Head_Tail_Training:
                     avg_val_loss.append(loss.item())
                     
                     logits = output.logits
-                    total_correct += self.accuracy(logits, labels) * labels.size(0)
-                    total_samples += labels.size(0)
+                    all_preds.append(logits)
+                    all_labels.append(labels)
 
             avg_val_loss = np.mean(avg_val_loss)
-            val_accuracy = total_correct / total_samples
+            all_preds = torch.cat(all_preds)
+            all_labels = torch.cat(all_labels)
+            
+            val_accuracy = self.accuracy(all_preds, all_labels)
+            val_f1 = self.f1_score(all_preds, all_labels)
             val_accuracies.append(val_accuracy)
+            val_f1_scores.append(val_f1)
             
             if avg_val_loss < best_val_loss:
                 counter = 0
@@ -184,22 +197,23 @@ class Head_Tail_Training:
                     print(f"Early stopping at epoch {epoch+1}")
                     break
 
-            print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.3f} | Validation Loss: {avg_val_loss:.3f} | Validation Accuracy: {val_accuracy:.3f}")
+            print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.3f} | Validation Loss: {avg_val_loss:.3f} | Validation Accuracy: {val_accuracy:.3f} | Validation F1 Score: {val_f1:.3f}")
             train_losses.append(avg_train_loss)
             val_losses.append(avg_val_loss)
-
-        min_len = min(len(train_losses), len(val_losses), len(val_accuracies))
-        train_losses = train_losses[:min_len]
-        val_losses = val_losses[:min_len]
-        val_accuracies = val_accuracies[:min_len]
         
-        df = pd.DataFrame({"train": train_losses, "val": val_losses, "val_accuracy": val_accuracies})
+        df = pd.DataFrame({
+            "train": train_losses[:len(val_losses)],  
+            "val": val_losses,
+            "val_accuracy": val_accuracies[:len(val_losses)],
+            "val_f1_score": val_f1_scores[:len(val_losses)]  
+        })
         plt.plot(df.index + 1, df["train"], label="train loss")
         plt.plot(df.index + 1, df["val"], label="val loss")
         plt.plot(df.index + 1, df["val_accuracy"], label="val accuracy")
+        plt.plot(df.index + 1, df["val_f1_score"], label="val f1 score")
         plt.xlabel("epoch")
         plt.ylabel("value")
-        plt.title("Loss and Accuracy over epochs")
+        plt.title("Loss, Accuracy, and F1 Score over epochs")
         plt.legend()
         plt.savefig("metrics_curve.png")
         plt.show()
@@ -211,10 +225,10 @@ class Head_Tail_Training:
 
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('google-bert/bert-base-multilingual-cased')
-    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=91)
+    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=206)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     trainer = Head_Tail_Training(model, 
                                  tokenizer, 
-                                 "/data-disk/scraping-output/p-drive-structured", 
+                                 "/data-disk/scraping-output", 
                                  device)
     trainer.train(num_epochs=100, lr=2e-5)
