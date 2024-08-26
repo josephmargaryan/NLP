@@ -158,10 +158,8 @@ if __name__ == "__main__":
         path_to_data="/data-disk/scraping-output/p-drive-structured"
     )
 
-    df = inference.run_inference()
-
     # Run inference
-    df_with_predictions = inference.run_inference(df)
+    df_with_predictions = inference.run_inference()
 
     # Save the resulting dataframe
     df_with_predictions.to_csv("inference_results.csv", index=False)
