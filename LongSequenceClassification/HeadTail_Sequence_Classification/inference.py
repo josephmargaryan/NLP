@@ -4,17 +4,55 @@ import re
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch.nn.functional as F
 from tqdm import tqdm
+from sklearn.preprocessing import LabelEncoder
+import pickle
+import os
 
 class HeadTailInference:
-    def __init__(self, model_path, tokenizer_name, device):
-        self.model = AutoModelForSequenceClassification.from_pretrained(tokenizer_name)
+    def __init__(self, model_path, tokenizer_name, device, le_path, path_to_data):
+        self.model = AutoModelForSequenceClassification.from_pretrained(tokenizer_name, num_labels=206)
         self.model.load_state_dict(torch.load(model_path))
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.device = device
+        self.path_to_data = path_to_data
         self.model.to(self.device)
         self.model.eval()
 
-    def preprocess_data(self, df):
+        with open (le_path, "rb") as f:
+            self.le = pickle.load(f)
+
+
+    def load_data(self):
+        """
+        Takes the file path with the parquet files, concatenates them, and removes documents with non-manual classification.
+        """
+        out_folder = self.path_to_data
+        regex = ".parquet"
+
+        folders = os.listdir(out_folder)
+        dataframes = []
+        for folder in folders:
+            folder_path = os.path.join(out_folder, folder)
+            if os.path.isdir(folder_path):
+                files = os.listdir(folder_path)
+                for file in tqdm(files, desc=f"Processing files in {folder}", unit="file"):
+                    if file.endswith(regex):
+                        file_path = os.path.join(folder_path, file)
+                        df = pd.read_parquet(file_path)
+                        dataframes.append(df)
+
+        df = pd.concat(dataframes, axis=0) 
+        print(f"Length before filtering {len(df)}")
+        df.reset_index(drop=True, inplace=True)
+        df = df.loc[~df["text"].isna(), :]
+        df = df[df["text"].apply(lambda x: len(str(x)) > 10)]
+        df = df.loc[~df["CLASSIFICATION"].isna(), :]
+        print(f"Number of samples with manual classification {len(df)}")
+        df["x"] = df["text"]
+        
+        return df.iloc[0:3, :]
+    def preprocess_data(self):
+        df = self.load_data()
         def clean_text(text):
             text = text.lower()
             text = re.sub(r"http\S+|www\S+", '', text, flags=re.MULTILINE)
@@ -72,17 +110,38 @@ class HeadTailInference:
 
         return pred_label, pred_prob
 
-    def run_inference(self, df):
-        df = self.preprocess_data(df)
+    def run_inference(self, batch_size=16):
+        df = self.preprocess_data()
         preds = []
         probs = []
+        
+        all_input_ids = []
+        all_attention_masks = []
+        
+        for text in tqdm(df['x'], desc="Tokenizing for inference", unit="text"):
+            input_ids, attention_mask = self.tokenize_and_select(text)
+            if input_ids is not None and attention_mask is not None:
+                all_input_ids.append(input_ids)
+                all_attention_masks.append(attention_mask)
+        
+        # Batch processing
+        dataset = torch.utils.data.TensorDataset(torch.stack(all_input_ids), torch.stack(all_attention_masks))
+        dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size)
 
-        for text in tqdm(df['x'], desc="Running inference", unit="text"):
-            pred_label, pred_prob = self.infer(text)
-            preds.append(pred_label)
-            probs.append(pred_prob)
+        for batch in tqdm(dataloader, desc="Running inference", unit="batch"):
+            input_ids, attention_masks = [x.to(self.device) for x in batch]
 
-        df['pred_label'] = preds
+            with torch.no_grad():
+                output = self.model(input_ids=input_ids, attention_mask=attention_masks)
+                logits = output.logits
+                probs_batch = F.softmax(logits, dim=-1)
+                pred_labels_batch = torch.argmax(probs_batch, dim=-1).cpu().numpy()
+                pred_probs_batch = torch.max(probs_batch, dim=-1).values.cpu().numpy()
+                
+                preds.extend(pred_labels_batch)
+                probs.extend(pred_probs_batch)
+
+        df['pred_label'] = self.le.inverse_transform(preds)
         df['pred_prob'] = probs
 
         return df
@@ -91,15 +150,15 @@ class HeadTailInference:
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # Initialize HeadTailInference class
     inference = HeadTailInference(
-        model_path="best_model.pth",  
+        model_path="/home/jmar/Head_Tail_Method/best_model.pth",  
         tokenizer_name="google-bert/bert-base-multilingual-cased", 
-        device=device
+        device=device,
+        le_path="/home/jmar/Head_Tail_Method/label_encoder.pkl",
+        path_to_data="/data-disk/scraping-output/p-drive-structured"
     )
 
-    # Load your data
-    df = pd.read_csv("path/to/inference_data.csv")  
+    df = inference.run_inference()
 
     # Run inference
     df_with_predictions = inference.run_inference(df)
