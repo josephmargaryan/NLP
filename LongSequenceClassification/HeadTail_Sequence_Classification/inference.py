@@ -50,7 +50,7 @@ class HeadTailInference:
         print(f"Number of samples with manual classification {len(df)}")
         df["x"] = df["text"]
         
-        return df.iloc[0:3, :]
+        return df
     def preprocess_data(self):
         df = self.load_data()
         def clean_text(text):
