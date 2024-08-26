@@ -200,6 +200,10 @@ class Head_Tail_Training:
             print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.3f} | Validation Loss: {avg_val_loss:.3f} | Validation Accuracy: {val_accuracy:.3f} | Validation F1 Score: {val_f1:.3f}")
             train_losses.append(avg_train_loss)
             val_losses.append(avg_val_loss)
+            if (epoch + 1) % 2 == 0:
+                checkpoint_path = f"checkpoint_epoch_{epoch+1}.pth"
+                torch.save(self.model.state_dict(), checkpoint_path)
+                print(f"Checkpoint saved at {checkpoint_path}")
         
         df = pd.DataFrame({
             "train": train_losses[:len(val_losses)],  
