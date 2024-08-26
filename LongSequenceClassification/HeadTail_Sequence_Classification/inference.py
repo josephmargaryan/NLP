@@ -6,24 +6,15 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 class HeadTailInference:
-    def __init__(self, model_path, tokenizer_name, device, path_to_data, label_encoder_path):
+    def __init__(self, model_path, tokenizer_name, device):
         self.model = AutoModelForSequenceClassification.from_pretrained(tokenizer_name)
         self.model.load_state_dict(torch.load(model_path))
         self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         self.device = device
         self.model.to(self.device)
         self.model.eval()
-        self.path_to_data = path_to_data
-        with open(label_encoder_path, 'rb') as f:
-            self.label_encoder = pickle.load(f)
 
-    def load_data(self):
-        df = pd.read_csv(self.path_to_data)
-        df["y"] = self.label_encoder.transform(df["CLASSIFICATION"])
-        return df
-        
     def preprocess_data(self, df):
-        df = self.load_data()
         def clean_text(text):
             text = text.lower()
             text = re.sub(r"http\S+|www\S+", '', text, flags=re.MULTILINE)
@@ -48,15 +39,14 @@ class HeadTailInference:
     def tokenize_and_select(self, text, first_tokens=128, last_tokens=382):
         tokens = self.tokenizer(text, return_tensors='pt', truncation=False, padding=False)
         input_ids = tokens['input_ids'].squeeze()
+        
+        if input_ids.size(0) <= (first_tokens + last_tokens):
+            selected_ids = input_ids  
+        else:
+            selected_ids = torch.cat([input_ids[:first_tokens], input_ids[-last_tokens:]])
 
-        if input_ids.size(0) < (first_tokens + last_tokens):
-            print(f"Warning: The input sequence is shorter than {first_tokens + last_tokens} tokens.")
-            return None, None
-
-        selected_ids = torch.cat([input_ids[:first_tokens], input_ids[-last_tokens:]])
         attention_mask = torch.ones_like(selected_ids)
 
-        # Padding if necessary
         if selected_ids.size(0) < (first_tokens + last_tokens):
             padding_length = (first_tokens + last_tokens) - selected_ids.size(0)
             selected_ids = torch.cat([selected_ids, torch.zeros(padding_length, dtype=torch.long)])
@@ -68,9 +58,9 @@ class HeadTailInference:
         input_ids, attention_mask = self.tokenize_and_select(text)
 
         if input_ids is None or attention_mask is None:
-            return None, None  # Skip inference if tokenization failed
+            return None, None  
 
-        input_ids = input_ids.unsqueeze(0).to(self.device)  # Add batch dimension
+        input_ids = input_ids.unsqueeze(0).to(self.device)
         attention_mask = attention_mask.unsqueeze(0).to(self.device)
 
         with torch.no_grad():
@@ -103,13 +93,13 @@ if __name__ == "__main__":
 
     # Initialize HeadTailInference class
     inference = HeadTailInference(
-        model_path="best_model.pth",  # Path to your trained model's state_dict
-        tokenizer_name="google-bert/bert-base-multilingual-cased",  # The same tokenizer you used for training
+        model_path="best_model.pth",  
+        tokenizer_name="google-bert/bert-base-multilingual-cased", 
         device=device
     )
 
     # Load your data
-    df = pd.read_csv("path/to/inference_data.csv")  # Path to your inference data
+    df = pd.read_csv("path/to/inference_data.csv")  
 
     # Run inference
     df_with_predictions = inference.run_inference(df)
