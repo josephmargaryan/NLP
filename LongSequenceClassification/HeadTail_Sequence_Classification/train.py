@@ -46,10 +46,11 @@ class Head_Tail_Training:
             final_df.reset_index(drop=True, inplace=True)
             df = final_df.loc[~final_df["text"].isna()]
             df = df.loc[~df["classification__v"].isna()]
+            df["y"] = df[["type__v", "subtype__v", "classification__v"]].apply(lambda x: "|".join(x.astype(str)), axis=1)
             le = LabelEncoder()
-            df["y"] = le.fit_transform(df["classification__v"])
+            df["y"] = le.fit_transform(df["y"])
             df["x"] = df["text"]
-            with open("label_encoder.pkl", "wb") as f:
+            with open("Final_label_encoder.pkl", "wb") as f:
                 pickle.dump(le, f)
             return df
         else:
@@ -106,7 +107,7 @@ class Head_Tail_Training:
 
         return all_input_ids, all_attention_masks, all_labels
     
-    def create_dataloader(self, batch_size=16):
+    def create_dataloader(self, batch_size=32):
         all_input_ids, all_attention_masks, all_labels = self.tokenize()
 
         dataset = TensorDataset(all_input_ids, all_attention_masks, all_labels)
@@ -132,6 +133,9 @@ class Head_Tail_Training:
     def train(self, num_epochs, lr=2e-5, patience=5, max_grad_norm=1.0):
         train_loader, val_loader = self.create_dataloader()
         self.model.to(self.device)
+
+        scaler = torch.amp.GradScaler()
+        
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=lr)
         train_losses = []
         val_losses = []
@@ -140,22 +144,30 @@ class Head_Tail_Training:
         best_model_state = None
         counter = 0
         best_val_loss = float("inf")
-        
+
         for epoch in range(num_epochs):
             avg_train_loss = []
             self.model.train()
+
             for i, (input_ids, attention_mask, labels) in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch+1}")):
                 input_ids = input_ids.to(self.device)
                 attention_mask = attention_mask.to(self.device)
                 labels = labels.to(self.device)
-                
+
                 optimizer.zero_grad()
-                output = self.model(input_ids, attention_mask=attention_mask, labels=labels)
-                loss = output.loss
-                loss.backward()
+
+                with torch.amp.autocast(device_type="cuda", dtype=torch.float16):  
+                    output = self.model(input_ids, attention_mask=attention_mask, labels=labels)
+                    loss = output.loss
+
+                scaler.scale(loss).backward()
                 
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_grad_norm)
-                optimizer.step()
+                
+                scaler.step(optimizer)
+                scaler.update()
+
                 avg_train_loss.append(loss.item())
 
             avg_train_loss = np.mean(avg_train_loss)
@@ -164,14 +176,17 @@ class Head_Tail_Training:
             all_preds = []
             all_labels = []
             self.model.eval()
+
             for j, (input_ids, attention_mask, labels) in enumerate(tqdm(val_loader, desc=f"Validation Epoch {epoch+1}")):
                 input_ids = input_ids.to(self.device)
                 attention_mask = attention_mask.to(self.device)
                 labels = labels.to(self.device)
 
                 with torch.no_grad():
-                    output = self.model(input_ids, attention_mask=attention_mask, labels=labels)
-                    loss = output.loss
+                    with torch.amp.autocast(device_type="cuda", dtype=torch.float16):  
+                        output = self.model(input_ids, attention_mask=attention_mask, labels=labels)
+                        loss = output.loss
+
                     avg_val_loss.append(loss.item())
                     
                     logits = output.logits
@@ -196,6 +211,7 @@ class Head_Tail_Training:
                 if counter >= patience:
                     print(f"Early stopping at epoch {epoch+1}")
                     break
+
 
             print(f"Epoch [{epoch+1}/{num_epochs}] | Train Loss: {avg_train_loss:.3f} | Validation Loss: {avg_val_loss:.3f} | Validation Accuracy: {val_accuracy:.3f} | Validation F1 Score: {val_f1:.3f}")
             train_losses.append(avg_train_loss)
@@ -225,11 +241,9 @@ class Head_Tail_Training:
         if best_model_state is not None:
             torch.save(best_model_state, "best_model.pth")
 
-
-
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('google-bert/bert-base-multilingual-cased')
-    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=206)
+    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=246)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     trainer = Head_Tail_Training(model, 
                                  tokenizer, 
