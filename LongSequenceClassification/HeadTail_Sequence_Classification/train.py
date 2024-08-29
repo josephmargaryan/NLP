@@ -14,50 +14,38 @@ import pickle
 from sklearn.metrics import f1_score, accuracy_score, classification_report
 
 class Head_Tail_Training:
-    def __init__(self, model, tokenizer, path_to_data, device):
+    def __init__(self, model, tokenizer, device):
         self.model = model
         self.tokenizer = tokenizer
-        self.path_to_data = path_to_data
         self.device = device 
 
     def load_data(self):
-        """
-        Traverses all folders and subfolders within the specified parent directory, excluding 'p-drive-structured',
-        and concatenates all Parquet files into a single DataFrame.
-        """
-        parent_folder = self.path_to_data
-        regex = ".parquet"
 
         dataframes = []
-
-        for root, dirs, files in os.walk(parent_folder):
-
-            if 'p-drive-structured' in root:
-                continue
-
-            for file in tqdm(files, desc=f"Processing files in {root}", unit="file"):
-                if file.endswith(regex):
-                    file_path = os.path.join(root, file)
-                    df = pd.read_parquet(file_path)
+        for folder in tqdm(os.listdir("/data-disk/scraping-output/icon"), desc="Iterating through root"):
+            for file in tqdm(os.listdir(os.path.join("/data-disk/scraping-output/icon", folder)), desc="Iterating through folders"):
+                if ".parquet" in file:
+                    df = pd.read_parquet(os.path.join("/data-disk/scraping-output/icon", folder, file))
                     dataframes.append(df)
 
-        if dataframes:
+
             final_df = pd.concat(dataframes, axis=0) 
             final_df.reset_index(drop=True, inplace=True)
             df = final_df.loc[~final_df["text"].isna()]
             df = df.loc[~df["classification__v"].isna()]
-            df["y"] = df[["type__v", "subtype__v", "classification__v"]].apply(lambda x: "|".join(x.astype(str)), axis=1)
+            value_counts_dict = df['classification__v'].value_counts().to_dict()
+
+            MIN_SAMPLES = 50
+            def replace_low_count(value):
+                return value if value_counts_dict[value] > MIN_SAMPLES else "UNKNOWN"
+            df["CLASSIFICATION"] = df["classification__v"].apply(lambda x: replace_low_count(x))
             le = LabelEncoder()
-            df["y"] = le.fit_transform(df["y"])
+            df['y'] = le.fit_transform(df['CLASSIFICATION'])
             df["x"] = df["text"]
-            with open("Final_label_encoder.pkl", "wb") as f:
+            with open("label_encoder.pkl", "wb") as f:
                 pickle.dump(le, f)
             return df
-        else:
-            print("No Parquet files found.")
-            return pd.DataFrame() 
 
-  
     def preprocess_data(self):
         df = self.load_data()
 
@@ -247,6 +235,5 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     trainer = Head_Tail_Training(model, 
                                  tokenizer, 
-                                 "/data-disk/scraping-output", 
                                  device)
     trainer.train(num_epochs=100, lr=2e-5)
