@@ -119,34 +119,48 @@ class ECEStatistics:
 
     def correct_predictions_by_class(self) -> None:
         """
-        Count and print correct predictions by class.
+        Count, print correct predictions, and calculate accuracy by class.
         """
         assert len(self.y_true) == len(self.y_hat), "y_true and y_hat must have the same length"
 
         correct_counts = defaultdict(int)
+        total_counts = defaultdict(int)
 
         for yt, yh in zip(self.y_true, self.y_hat):
+            total_counts[yt] += 1
             if yt == yh:
                 correct_counts[yt] += 1
 
         sorted_correct_counts = sorted(correct_counts.items(), key=lambda item: item[1], reverse=True)
 
-        print("Correct predictions by class:")
+        print("Correct predictions and accuracy by class:")
         for cls, count in sorted_correct_counts:
-            print(f"Class '{cls}': {count} correct predictions")
+            accuracy = (count / total_counts[cls]) * 100  # Calculate accuracy for each class
+            print(f"Class '{cls}': {count} correct predictions, Accuracy: {accuracy:.2f}%")
 
         classes = [cls for cls, _ in sorted_correct_counts]
         counts = [count for _, count in sorted_correct_counts]
+        accuracies = [(correct_counts[cls] / total_counts[cls]) * 100 for cls in classes]
 
-
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(12, 8))
+        
+        plt.subplot(2, 1, 1)
         plt.bar(classes, counts, color='skyblue')
         plt.xlabel('Class')
         plt.ylabel('Number of Correct Predictions')
         plt.title('Correct Predictions by Class')
-        plt.xticks(rotation=45)
+        plt.xticks(rotation=90)
+        
+        plt.subplot(2, 1, 2)
+        plt.bar(classes, accuracies, color='lightgreen')
+        plt.xlabel('Class')
+        plt.ylabel('Accuracy (%)')
+        plt.title('Accuracy by Class')
+        plt.xticks(rotation=90)
+
         plt.tight_layout()
-        plt.savefig("Barplot.png")
+        plt.savefig("CorrectPredictionsAndAccuracy.png")
+        plt.show()
 
     def plot_confidence_distribution(self) -> None:
         """
