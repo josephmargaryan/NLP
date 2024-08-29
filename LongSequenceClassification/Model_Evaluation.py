@@ -62,49 +62,48 @@ class ECEStatistics:
         return None, None  # If all values are UNKNOWN
 
     def create_ece(self, num_bins: Optional[int] = 10):
-        """
-        Calculate and plot the Expected Calibration Error (ECE) for a set of predictions.
-        """
-        true_labels = self.y_true
-        predicted_labels = self.y_hat
-        predicted_confidences = self.y_conf
+            """
+            Calculate and plot the Expected Calibration Error (ECE) for a set of predictions.
+            """
+            true_labels = self.y_true
+            predicted_labels = self.y_hat
+            predicted_confidences = self.y_conf
+    
+            classes = sorted(set(true_labels))
+            bins = np.linspace(0, 1, num_bins + 1)
+    
+            total_bin_counts = np.zeros(num_bins)
+            total_bin_correct_counts = np.zeros(num_bins)
+            total_bin_confidences = np.zeros(num_bins)
+    
+            for true, pred, conf in zip(true_labels, predicted_labels, predicted_confidences):
+                bin_index = np.digitize(conf, bins) - 1
+                bin_index = max(0, min(bin_index, num_bins - 1))
+    
+                total_bin_counts[bin_index] += 1
+                total_bin_confidences[bin_index] += conf
+                if true == pred:
+                    total_bin_correct_counts[bin_index] += 1
+    
+            with np.errstate(divide='ignore', invalid='ignore'):
+                bin_accuracies = np.where(total_bin_counts > 0, total_bin_correct_counts / total_bin_counts, 0)
+                bin_confidences = np.where(total_bin_counts > 0, total_bin_confidences / total_bin_counts, 0)
+    
+            ece = np.sum(total_bin_counts * np.abs(bin_accuracies - bin_confidences)) / np.sum(total_bin_counts)
+    
+            plt.figure(figsize=(12, 8))
+            plt.plot(bin_confidences, bin_accuracies, marker='o', label='Calibration Curve')
+            plt.plot([0, 1], [0, 1], color='grey', linestyle='--', label='Perfect Calibration')
+            plt.xlabel('Confidence Score')
+            plt.ylabel('Fraction of Positives')
+            plt.title('Calibration Curve')
+            plt.legend(loc='best')
+            plt.grid(True)
+            plt.savefig("ECE_Overall.png")
+    
+            print(f'Overall ECE: {ece:.4f}')
+            return ece
 
-        classes = sorted(set(true_labels))
-        bins = np.linspace(0, 1, num_bins + 1)
-
-        total_bin_counts = np.zeros(num_bins)
-        total_bin_correct_counts = np.zeros(num_bins)
-        total_bin_confidences = np.zeros(num_bins)
-
-        for true, pred, conf in zip(true_labels, predicted_labels, predicted_confidences):
-            bin_index = np.digitize(conf, bins) - 1
-            bin_index = max(0, min(bin_index, num_bins - 1))  
-
-            total_bin_counts[bin_index] += 1
-            total_bin_confidences[bin_index] += conf
-            if true == pred:
-                total_bin_correct_counts[bin_index] += 1
-
-        bin_accuracies = total_bin_correct_counts / total_bin_counts
-        bin_confidences = total_bin_confidences / total_bin_counts
-
-        bin_accuracies = np.nan_to_num(bin_accuracies)
-        bin_confidences = np.nan_to_num(bin_confidences)
-
-        ece = np.sum(total_bin_counts * np.abs(bin_accuracies - bin_confidences)) / np.sum(total_bin_counts)
-
-        plt.figure(figsize=(12, 8))
-        plt.plot(bin_confidences, bin_accuracies, marker='o', label='Calibration Curve')
-        plt.plot([0, 1], [0, 1], color='grey', linestyle='--', label='Perfect Calibration')
-        plt.xlabel('Confidence Score')
-        plt.ylabel('Fraction of Positives')
-        plt.title('Calibration Curve')
-        plt.legend(loc='best')
-        plt.grid(True)
-        plt.savefig("ECE_Overall.png")
-
-        print(f'Overall ECE: {ece:.4f}')
-        return ece
 
     def calculate_accuracy(self) -> float:
         """
