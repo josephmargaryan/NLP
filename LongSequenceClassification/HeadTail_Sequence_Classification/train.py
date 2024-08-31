@@ -14,37 +14,27 @@ import pickle
 from sklearn.metrics import f1_score, accuracy_score, classification_report
 
 class Head_Tail_Training:
-    def __init__(self, model, tokenizer, device):
+    def __init__(self, path, model, tokenizer, device):
+        self.path = path
         self.model = model
         self.tokenizer = tokenizer
-        self.device = device 
+        self.device = device
 
     def load_data(self):
 
         dataframes = []
-        for folder in tqdm(os.listdir("/data-disk/scraping-output/icon"), desc="Iterating through root"):
-            for file in tqdm(os.listdir(os.path.join("/data-disk/scraping-output/icon", folder)), desc="Iterating through folders"):
-                if ".parquet" in file:
-                    df = pd.read_parquet(os.path.join("/data-disk/scraping-output/icon", folder, file))
+        for folder in tqdm(os.listdir(self.path), desc="Processing folders {folder}"):
+            folder_path = os.path.join(self.path, folder)
+            for file in os.listdir(folder_path):
+                if file.endswith(".parquet"):
+                    file_name = os.path.join(folder_path, file)
+                    df = pd.read_parquet(file_name)
                     dataframes.append(df)
-
-
-            final_df = pd.concat(dataframes, axis=0) 
-            final_df.reset_index(drop=True, inplace=True)
-            df = final_df.loc[~final_df["text"].isna()]
-            df = df.loc[~df["classification__v"].isna()]
-            value_counts_dict = df['classification__v'].value_counts().to_dict()
-
-            MIN_SAMPLES = 50
-            def replace_low_count(value):
-                return value if value_counts_dict[value] > MIN_SAMPLES else "UNKNOWN"
-            df["CLASSIFICATION"] = df["classification__v"].apply(lambda x: replace_low_count(x))
-            le = LabelEncoder()
-            df['y'] = le.fit_transform(df['CLASSIFICATION'])
-            df["x"] = df["text"]
-            with open("label_encoder.pkl", "wb") as f:
-                pickle.dump(le, f)
-            return df
+        final_df = pd.concat(dataframes, axis=0)
+        final_df = final_df.dropna(subset=["type__v", "subtype__v", "classification__v"])
+        final_df = final_df.loc[~final_df["text"].isna()]
+        
+        return final_df
 
     def preprocess_data(self):
         df = self.load_data()
@@ -67,10 +57,46 @@ class Head_Tail_Training:
             
             return text
 
-        df['x'] = df['x'].apply(clean_text)
+        df['x'] = df['text'].apply(clean_text)
         return df
     
+
+
+    def labelencode(self, max_count=2000, min_count=250):
+        print(f"Beginning Label Encoding")
+ 
+        df = self.preprocess_data()
+
+        class_counts = df["classification__v"].value_counts()
+
+        filtered_classes = class_counts[class_counts >= min_count].index
+        df.loc[~df["classification__v"].isin(filtered_classes), "classification__v"] = "UNKNOWN"
+
+        class_counts = df["classification__v"].value_counts()
+        
+        balanced_dfs = []
+
+        for class_name, count in class_counts.items():
+            class_df = df[df["classification__v"] == class_name]
+            
+            if count > max_count:
+                class_df = class_df.sample(max_count, random_state=42)
+
+            balanced_dfs.append(class_df)
+
+        balanced_df = pd.concat(balanced_dfs)
+ 
+        le = LabelEncoder()
+        balanced_df["y"] = le.fit_transform(balanced_df["classification__v"])
+
+        with open("label_encoder.pkl", "wb") as f:
+            pickle.dump(le, f)
+        
+        return balanced_df
+
+    
     def tokenize(self):
+        print("beginning tokenization")
         def tokenize_and_select(text, tokenizer, first_tokens=128, last_tokens=382):
             tokens = tokenizer(text, return_tensors='pt', truncation=False, padding=False)
             input_ids = tokens['input_ids'].squeeze()
@@ -86,7 +112,7 @@ class Head_Tail_Training:
 
             return selected_ids, attention_mask
         
-        df = self.preprocess_data()
+        df = self.labelencode()
         df[['input_ids', 'attention_mask']] = df['x'].apply(lambda x: tokenize_and_select(x, self.tokenizer)).apply(pd.Series)
 
         all_input_ids = torch.stack(df['input_ids'].tolist())
@@ -96,6 +122,7 @@ class Head_Tail_Training:
         return all_input_ids, all_attention_masks, all_labels
     
     def create_dataloader(self, batch_size=32):
+        print("Creating dataloaders")
         all_input_ids, all_attention_masks, all_labels = self.tokenize()
 
         dataset = TensorDataset(all_input_ids, all_attention_masks, all_labels)
@@ -231,9 +258,11 @@ class Head_Tail_Training:
 
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('google-bert/bert-base-multilingual-cased')
-    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=246)
+    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=48)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    trainer = Head_Tail_Training(model, 
-                                 tokenizer, 
-                                 device)
+    path = "/data-disk/scraping-output/icon"
+    trainer = Head_Tail_Training(path=path,
+                                 model=model,
+                                 tokenizer=tokenizer,
+                                 device=device)
     trainer.train(num_epochs=100, lr=2e-5)
