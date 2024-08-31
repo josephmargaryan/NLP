@@ -14,9 +14,9 @@ import pickle
 from sklearn.metrics import f1_score, accuracy_score, classification_report
 
 class Head_Tail_Training:
-    def __init__(self, path, model, tokenizer, device):
+    def __init__(self, path, tokenizer, device):
         self.path = path
-        self.model = model
+        self.model = None
         self.tokenizer = tokenizer
         self.device = device
 
@@ -88,9 +88,14 @@ class Head_Tail_Training:
  
         le = LabelEncoder()
         balanced_df["y"] = le.fit_transform(balanced_df["classification__v"])
+        num_classes = len(le.classes_)
 
         with open("label_encoder.pkl", "wb") as f:
             pickle.dump(le, f)
+
+        self.model = AutoModelForSequenceClassification.from_pretrained(
+            'google-bert/bert-base-multilingual-cased',
+            num_labels=num_classes).to(self.device)
         
         return balanced_df
 
@@ -258,11 +263,9 @@ class Head_Tail_Training:
 
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('google-bert/bert-base-multilingual-cased')
-    model = AutoModelForSequenceClassification.from_pretrained('google-bert/bert-base-multilingual-cased', num_labels=48)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     path = "/data-disk/scraping-output/icon"
     trainer = Head_Tail_Training(path=path,
-                                 model=model,
                                  tokenizer=tokenizer,
                                  device=device)
     trainer.train(num_epochs=100, lr=2e-5)
