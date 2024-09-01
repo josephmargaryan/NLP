@@ -90,40 +90,41 @@ class HierarchicalDataset(Dataset):
     def __getitem__(self, idx):
         text = self.texts[idx]
         label = self.labels[idx]
-
-        # Tokenize the entire text
         tokens = self.tokenizer(text, add_special_tokens=False, return_tensors='pt')['input_ids'].squeeze(0)
+        
+        if len(tokens) == 0:
+            # Handling case where text tokenization might return an empty sequence
+            tokens = torch.tensor([self.tokenizer.cls_token_id, self.tokenizer.sep_token_id])
 
-        # Split tokens into chunks of chunk_size (510 tokens)
         chunks = [tokens[i:i + self.chunk_size] for i in range(0, len(tokens), self.chunk_size)]
 
-        # If the last chunk is less than chunk_size, pad it
+        # Ensure that each chunk is of the correct length
         for i, chunk in enumerate(chunks):
             if len(chunk) < self.chunk_size:
                 padding_length = self.chunk_size - len(chunk)
                 chunks[i] = torch.cat((chunk, torch.full((padding_length,), self.tokenizer.pad_token_id)))
 
-        # Add [CLS] token to the beginning of each chunk
+        # If no chunks were created, create a single chunk with CLS and SEP tokens
+        if len(chunks) == 0:
+            chunks = [torch.tensor([self.tokenizer.cls_token_id, self.tokenizer.sep_token_id])]
+
+        # Add [CLS] token at the beginning of each chunk
         chunks = [torch.cat((torch.tensor([self.tokenizer.cls_token_id]), chunk)) for chunk in chunks]
-
-        # Stack chunks into a 2D tensor
+        
+        # Now, stack the chunks
         input_ids = torch.stack(chunks)
-
-        # Create attention mask
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
 
-        # Apply pooling strategy to combine chunks into a single sequence
         if self.pooling_strategy == "mean":
-            input_ids = torch.mean(input_ids.float(), dim=0).long()  # Shape: (seq_length)
+            input_ids = torch.mean(input_ids.float(), dim=0).long() 
             attention_mask = torch.mean(attention_mask.float(), dim=0).long()
         elif self.pooling_strategy == "max":
-            input_ids = torch.max(input_ids, dim=0)[0]  # Shape: (seq_length)
+            input_ids = torch.max(input_ids, dim=0)[0]  
             attention_mask = torch.max(attention_mask, dim=0)[0]
         elif self.pooling_strategy == "self_attention":
             # Implement self-attention pooling if needed
             pass
 
-        # Ensure that the shape is (seq_length,) to be compatible with BERT
         return input_ids, attention_mask, label
 
 
@@ -187,18 +188,17 @@ def train(model,
                     logits = output.logits  # Extract the logits from the output
                     loss_fct = torch.nn.CrossEntropyLoss()
                     loss = loss_fct(logits, labels)
-                    avg_val_loss.append(loss.item())  # Append each batch loss to the list
+                    avg_val_loss.append(loss.item())  
                     all_preds.append(logits)
                     all_labels.append(labels)
 
-        avg_val_loss = np.mean(avg_val_loss)  # Calculate the mean after the loop
+        avg_val_loss = np.mean(avg_val_loss)  
 
         all_preds = torch.cat(all_preds)
         all_labels = torch.cat(all_labels)
         accuracy = accuracy_score(all_labels.cpu().numpy(), all_preds.argmax(dim=1).cpu().numpy())
         f1 = f1_score(all_labels.cpu().numpy(), all_preds.argmax(dim=1).cpu().numpy(), average='weighted')
         
-        # Early stopping and checkpointing logic
         if avg_val_loss < best_val_loss:
             counter = 0
             best_val_loss = avg_val_loss
@@ -212,7 +212,7 @@ def train(model,
         scheduler.step()
         tqdm.write(f"Epoch {epoch+1} | Val loss: {avg_val_loss:.3f}")
 
-        val_losses.append(avg_val_loss)  # Append mean val loss for the epoch
+        val_losses.append(avg_val_loss)  
         train_losses.append(avg_train_loss)
         val_accuracies.append(accuracy)
         val_f1_scores.append(f1)
@@ -225,7 +225,6 @@ def train(model,
         if best_model_state is not None:
             torch.save(best_model_state, "best_model.pth")
 
-    # Ensure you're storing lists, not floats
     df = pd.DataFrame({
         "train": train_losses[:len(val_losses)],  
         "val": val_losses,
@@ -242,9 +241,7 @@ def train(model,
     plt.legend()
     plt.savefig("metrics_curve.png")
     plt.show()
-
-
-            
+    print(f"Final Validation F1 Score: {val_f1_scores[-1]:.4f}")
 
 
 if __name__ == "__main__":
@@ -254,11 +251,6 @@ if __name__ == "__main__":
     model = AutoModelForSequenceClassification.from_pretrained('bert-base-multilingual-cased', num_labels=num_classes).to(device)
     train_loader = create_dataloader(train_df, tokenizer, batch_size=16, pooling_strategy="mean", shuffle=True)
     val_loader = create_dataloader(val_df, tokenizer, batch_size=16, pooling_strategy="mean", shuffle=False)
-    for (x, y, z) in train_loader:
-        print(x.shape)
-        print(y.shape)
-        print(y.shape)
-        break
 
     train(model,
           100,
@@ -267,3 +259,4 @@ if __name__ == "__main__":
           1e-4,
           3,
           device)
+
