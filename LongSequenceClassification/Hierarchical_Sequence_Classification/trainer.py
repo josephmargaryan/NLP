@@ -26,6 +26,7 @@ def get_data(path, max_count=2000, min_count=250):
     df = pd.concat(dataframes, axis=0)
     df = df.dropna(subset=["type__v", "subtype__v", "classification__v"])
     df = df.loc[~df["text"].isna()]
+    df = df[df["text"].apply(lambda x: len(str(x)) > 10)]
 
     def clean_text(text):
         text = text.lower()
@@ -91,16 +92,18 @@ class HierarchicalDataset(Dataset):
         label = self.labels[idx]
         tokens = self.tokenizer(text, add_special_tokens=False, return_tensors='pt')['input_ids'].squeeze(0)
         
-        # Split the tokens into chunks of max length (chunk_size - 2)
+        if tokens.size(0) == 0:  # If no tokens are generated
+            tokens = torch.tensor([self.tokenizer.unk_token_id])  # Use UNK token as placeholder
+
+        # Split the tokens into chunks
         chunks = [tokens[i:i + (self.chunk_size - 2)] for i in range(0, len(tokens), self.chunk_size - 2)]
         
-        # Add CLS and SEP tokens and pad to chunk_size
         padded_chunks = []
         for chunk in chunks:
             chunk = torch.cat([
-                torch.tensor([self.tokenizer.cls_token_id]),
+                torch.tensor([self.tokenizer.cls_token_id]),  # CLS token at the start
                 chunk,
-                torch.tensor([self.tokenizer.sep_token_id])
+                torch.tensor([self.tokenizer.sep_token_id])  # SEP token at the end
             ])
 
             # Padding if needed
@@ -113,28 +116,28 @@ class HierarchicalDataset(Dataset):
         input_ids = torch.stack(padded_chunks).to(self.device)
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long().to(self.device)
 
-        # Pass each chunk through BERT separately
+        # Pass each chunk through the model
         with torch.no_grad():
             cls_embeddings = []
             for i in range(input_ids.size(0)):
-                output = self.model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0))
-                cls_embeddings.append(output.last_hidden_state[:, 0, :])  # Extract the [CLS] token embeddings
+                outputs = self.model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0))
+                cls_embeddings.append(outputs.last_hidden_state[:, 0, :])  # CLS token embedding
 
-        cls_embeddings = torch.cat(cls_embeddings, dim=0)  # Shape: (num_chunks, hidden_size)
+        cls_embeddings = torch.cat(cls_embeddings, dim=0)
 
-        # Apply the pooling strategy to combine chunk representations
+        # Pooling
         if self.pooling_strategy == "mean":
-            document_representation = torch.mean(cls_embeddings, dim=0)  # Shape: (hidden_size)
+            document_representation = torch.mean(cls_embeddings, dim=0)
         elif self.pooling_strategy == "max":
-            document_representation = torch.max(cls_embeddings, dim=0)[0]  # Shape: (hidden_size)
+            document_representation = torch.max(cls_embeddings, dim=0)[0]
         elif self.pooling_strategy == "self_attention":
-            # Simple self-attention pooling implementation
-            attn_weights = torch.softmax(torch.bmm(cls_embeddings.unsqueeze(0), cls_embeddings.unsqueeze(0).transpose(1, 2)).squeeze(0), dim=-1)
-            document_representation = torch.bmm(attn_weights.unsqueeze(0), cls_embeddings.unsqueeze(0)).squeeze(0).mean(dim=0)
+            attn_weights = torch.softmax(torch.mm(cls_embeddings, cls_embeddings.transpose(0, 1)), dim=-1)
+            document_representation = torch.mm(attn_weights, cls_embeddings).mean(0)
         else:
             raise ValueError(f"Unknown pooling strategy: {self.pooling_strategy}")
 
         return document_representation, label
+
 
 def create_dataloader(df, tokenizer, model, device, batch_size=16, chunk_size=510, pooling_strategy="mean", shuffle=True):
     dataset = HierarchicalDataset(
@@ -288,4 +291,5 @@ if __name__ == "__main__":
           patience=3,
           device=device
           )
+
 
