@@ -70,7 +70,7 @@ def get_data(path, max_count=2000, min_count=250):
     with open("label_encoder.pkl", "wb") as f:
         pickle.dump(le, f)
     
-    train_df,  val_df = train_test_split(balanced_df.iloc[0:100, :], test_size=0.2)
+    train_df,  val_df = train_test_split(balanced_df, test_size=0.2)
     return train_df, val_df, num_classes
 
 class HierarchicalDataset(Dataset):
@@ -260,10 +260,6 @@ def train(model,
 
 
 
-
-
-
-
 if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -292,5 +288,4 @@ if __name__ == "__main__":
           patience=3,
           device=device
           )
-
 
