@@ -1,143 +1,138 @@
-import torch
+import torch 
 import torch.nn as nn
-import torch.nn.functional as F
-import pandas as pd
-import re
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from tqdm import tqdm
+import re 
+import pickle
+from transformers import AutoTokenizer, AutoModel
 
-class Inference:
-    def __init__(self, model_path, tokenizer_name, device, pooling_strategy="mean"):
-        self.model = AutoModelForSequenceClassification.from_pretrained(tokenizer_name)
-        self.model.load_state_dict(torch.load(model_path))
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        self.device = device
-        self.pooling_strategy = pooling_strategy
-        self.model.to(self.device)
-        self.model.eval()
 
-    def preprocess_data(self, df):
-        def clean_text(text):
-            text = text.lower()
-            text = re.sub(r"http\S+|www\S+|https\S+", '', text, flags=re.MULTILINE)
-            text = re.sub(r'<.*?>', '', text)
-            text = re.sub(r"[^a-zA-Z0-9?.!,¿]+", " ", text)
-            text = re.sub(r'\s+', ' ', text).strip()
-            emoji_pattern = re.compile("["
-                                    u"\U0001F600-\U0001F64F"  
-                                    u"\U0001F300-\U0001F5FF" 
-                                    u"\U0001F680-\U0001F6FF"  
-                                    u"\U0001F1E0-\U0001F1FF"  
-                                    u"\U00002702-\U000027B0"
-                                    u"\U000024C2-\U0001F251"
-                                    "]+", flags=re.UNICODE)
-            text = emoji_pattern.sub(r'', text)
-            
-            return text
+class DocumentClassifier(nn.Module):
+    def __init__(self, hidden_size, num_labels):
+        super(DocumentClassifier, self).__init__()
+        self.classifier = nn.Linear(hidden_size, num_labels)
 
-        df['x'] = df['x'].apply(clean_text)
-        return df
+    def forward(self, document_representation):
+        logits = self.classifier(document_representation)
+        return logits
+    
 
-    def sliding_window_inference_CLS(self, text, max_len=510, stride=250):
-        tokens = self.tokenizer(
-            text,
-            return_tensors="pt",
-            max_length=max_len,
-            truncation=True,
-            padding='max_length'
-        )
+def load_model(model_path, hidden_size, num_classes, device):
+    """Load the saved classifier model."""
+    model = DocumentClassifier(hidden_size=hidden_size, num_labels=num_classes).to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
+    return model
 
-        input_ids = tokens["input_ids"].to(self.device)
-        attention_mask = tokens["attention_mask"].to(self.device)
+def preprocess_text(text, tokenizer, bert_model, device, chunk_size=510, pooling_strategy="mean"):
+    """Tokenize and preprocess the text into document representation."""
+    # Clean the text (same as during training)
+    def clean_text(text):
+        text = text.lower()
+        text = re.sub(r"http\S+|www\S+|https\S+", '', text, flags=re.MULTILINE)
+        text = re.sub(r'<.*?>', '', text)
+        text = re.sub(r"[^a-zA-Z0-9?.!,¿]+", " ", text)
+        text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
+        text = re.sub(r'\s+', ' ', text).strip()
+        emoji_pattern = re.compile("["
+                                u"\U0001F600-\U0001F64F"  
+                                u"\U0001F300-\U0001F5FF" 
+                                u"\U0001F680-\U0001F6FF"  
+                                u"\U0001F1E0-\U0001F1FF"  
+                                u"\U00002702-\U000027B0"
+                                u"\U000024C2-\U0001F251"
+                                "]+", flags=re.UNICODE)
+        text = emoji_pattern.sub(r'', text)
+        return text
+    
+    text = clean_text(text)
+    tokens = tokenizer(text, add_special_tokens=False, return_tensors='pt')['input_ids'].squeeze(0)
 
-        input_len = input_ids.shape[1]
-        chunks = []
-        attention_chunks = []
+    # Split the tokens into chunks of max length (chunk_size - 2)
+    chunks = [tokens[i:i + (chunk_size - 2)] for i in range(0, len(tokens), chunk_size - 2)]
 
-        for i in range(0, input_len, stride):
-            end_index = min(i + max_len, input_len)
-            chunk = input_ids[:, i:end_index]
-            attn_chunk = attention_mask[:, i:end_index]
+    # Add CLS and SEP tokens and pad to chunk_size
+    padded_chunks = []
+    for chunk in chunks:
+        chunk = torch.cat([
+            torch.tensor([tokenizer.cls_token_id]),
+            chunk,
+            torch.tensor([tokenizer.sep_token_id])
+        ])
 
-            if chunk.shape[1] < max_len:
-                pad_length = max_len - chunk.shape[1]
-                chunk = torch.cat([chunk, torch.zeros((1, pad_length), dtype=torch.long).to(self.device)], dim=1)
-                attn_chunk = torch.cat([attn_chunk, torch.zeros((1, pad_length), dtype=torch.long).to(self.device)], dim=1)
+        # Padding if needed
+        padding_length = chunk_size - chunk.size(0)
+        if padding_length > 0:
+            chunk = torch.cat((chunk, torch.full((padding_length,), tokenizer.pad_token_id)))
 
-            chunks.append(chunk)
-            attention_chunks.append(attn_chunk)
+        padded_chunks.append(chunk)
 
-        outputs = []
+    input_ids = torch.stack(padded_chunks).to(device)
+    attention_mask = (input_ids != tokenizer.pad_token_id).long().to(device)
 
-        for chunk, attn_chunk in zip(chunks, attention_chunks):
-            with torch.no_grad():
-                output = self.model(input_ids=chunk, attention_mask=attn_chunk)
-                cls_embedding = output.last_hidden_state[:, 0, :]
-                outputs.append(cls_embedding)
+    # Pass each chunk through BERT separately
+    with torch.no_grad():
+        cls_embeddings = []
+        for i in range(input_ids.size(0)):
+            output = bert_model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0))
+            cls_embeddings.append(output.last_hidden_state[:, 0, :])  # Extract the [CLS] token embeddings
 
-        aggregated_output = torch.cat(outputs, dim=0)
+    cls_embeddings = torch.cat(cls_embeddings, dim=0)  # Shape: (num_chunks, hidden_size)
 
-        if self.pooling_strategy == "mean":
-            pooled_output = aggregated_output.mean(dim=0)
-        elif self.pooling_strategy == "max":
-            pooled_output = aggregated_output.max(dim=0).values
-        elif self.pooling_strategy == "attention":
-            pooled_output = self.attention_pooling(aggregated_output)
+    # Apply the pooling strategy to combine chunk representations
+    if pooling_strategy == "mean":
+        document_representation = torch.mean(cls_embeddings, dim=0)  # Shape: (hidden_size)
+    elif pooling_strategy == "max":
+        document_representation = torch.max(cls_embeddings, dim=0)[0]  # Shape: (hidden_size)
+    elif pooling_strategy == "self_attention":
+        # Simple self-attention pooling implementation
+        attn_weights = torch.softmax(torch.bmm(cls_embeddings.unsqueeze(0), cls_embeddings.unsqueeze(0).transpose(1, 2)).squeeze(0), dim=-1)
+        document_representation = torch.bmm(attn_weights.unsqueeze(0), cls_embeddings.unsqueeze(0)).squeeze(0).mean(dim=0)
+    else:
+        raise ValueError(f"Unknown pooling strategy: {pooling_strategy}")
 
-        return pooled_output
+    return document_representation
 
-    def attention_pooling(self, embeddings):
-        attention = nn.Sequential(
-            nn.Linear(embeddings.size(-1), 128),
-            nn.ReLU(),
-            nn.Linear(128, 1)
-        )
-        weights = attention(embeddings).softmax(dim=0)
-        weighted_avg = (weights * embeddings).sum(dim=0)
-        return weighted_avg
+def predict(texts, classifier_model, tokenizer, bert_model, device, label_encoder_path, chunk_size=510, pooling_strategy="mean"):
+    """Predict the class for a list of texts."""
+    # Load label encoder
+    with open(label_encoder_path, "rb") as f:
+        le = pickle.load(f)
 
-    def infer(self, text):
-        pooled_output = self.sliding_window_inference_CLS(text)
-        logits = self.model.classifier(pooled_output.unsqueeze(0))  # Apply the final classification layer
-        probs = F.softmax(logits, dim=-1)
-        pred_label = torch.argmax(probs, dim=-1).cpu().item()
-        pred_prob = torch.max(probs, dim=-1).values.cpu().item()
+    predictions = []
+    for text in texts:
+        # Preprocess text
+        document_representation = preprocess_text(text, tokenizer, bert_model, device, chunk_size, pooling_strategy)
+        document_representation = document_representation.unsqueeze(0).to(device)
 
-        return pred_label, pred_prob
+        # Get model prediction
+        with torch.no_grad():
+            logits = classifier_model(document_representation)
+            pred = torch.argmax(logits, dim=1).cpu().numpy()
 
-    def run_inference(self, df):
-        df = self.preprocess_data(df)
-        preds = []
-        probs = []
+        # Convert to label
+        predicted_label = le.inverse_transform(pred)[0]
+        predictions.append(predicted_label)
+    
+    return predictions
 
-        for text in tqdm(df['x'], desc="Running inference", unit="text"):
-            pred_label, pred_prob = self.infer(text)
-            preds.append(pred_label)
-            probs.append(pred_prob)
-
-        df['pred_label'] = preds
-        df['pred_prob'] = probs
-
-        return df
-
+def main():
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # Initialize the tokenizer and load the models
+    tokenizer = AutoTokenizer.from_pretrained('bert-base-multilingual-cased')
+    bert_model = AutoModel.from_pretrained('bert-base-multilingual-cased').to(device)
+    hidden_size = 768  # This should match the hidden size of the BERT model you're using
+    num_classes = 59  # Update this based on your actual number of classes
+    classifier_model = load_model("best_model.pth", hidden_size, num_classes, device)
+    
+    # Example texts for prediction
+    new_texts = ["Example text for prediction", "Another example text for classification"]
+    
+    # Predict labels for new texts
+    predictions = predict(new_texts, classifier_model, tokenizer, bert_model, device, "label_encoder.pkl")
+    
+    for text, prediction in zip(new_texts, predictions):
+        print(f"Text: {text}\nPredicted Label: {prediction}\n")
 
 if __name__ == "__main__":
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Initialize Inference class
-    inference = Inference(
-        model_path="best_model.pth",  # Path to your trained model's state_dict
-        tokenizer_name="bert-base-multilingual-cased",  # The same tokenizer you used for training
-        device=device,
-        pooling_strategy="mean"  # Change this to "max" or "attention" as needed
-    )
-
-    # Load your data
-    df = pd.read_csv("/kaggle/working/sample.csv")  # Path to your inference data
-
-    # Run inference
-    df_with_predictions = inference.run_inference(df)
-
-    # Save the resulting dataframe
-    df_with_predictions.to_csv("inference_results.csv", index=False)
+    main()
 
