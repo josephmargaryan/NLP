@@ -192,3 +192,11 @@ if __name__ == "__main__":
     # Print or save the similarity matrix
     print(similarity_matrix)
     torch.save(similarity_matrix, "similarity_matrix.pt")
+
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(similarity_matrix.cpu().numpy(), cmap="coolwarm", annot=False)
+    plt.title("Document Cosine Similarity Matrix")
+    plt.show()
