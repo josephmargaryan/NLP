@@ -187,16 +187,16 @@ if __name__ == "__main__":
     document_representations = get_document_representations(val_loader, device)
     
     # Compute cosine similarity between all document representations
+    document_list = val_df["x"].tolist()  
     similarity_matrix = compute_cosine_similarity(document_representations)
     
     # Print or save the similarity matrix
     print(similarity_matrix)
     torch.save(similarity_matrix, "similarity_matrix.pt")
+    np.fill_diagonal(similarity_matrix.cpu().numpy(), -np.inf)  # Fill diagonal with -inf to ignore self-similarity
+    max_sim_indices = np.unravel_index(np.argmax(similarity_matrix.cpu().numpy()), similarity_matrix.shape)
 
-    import seaborn as sns
-    import matplotlib.pyplot as plt
-    
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(similarity_matrix.cpu().numpy(), cmap="coolwarm", annot=False)
-    plt.title("Document Cosine Similarity Matrix")
-    plt.show()
+    doc1 = document_list[max_sim_indices[0]]
+    doc2 = document_list[max_sim_indices[1]]
+    print(f"The most similar documents are:\nDocument 1: {doc1}\nDocument 2: {doc2}")
+
