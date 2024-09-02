@@ -179,8 +179,8 @@ if __name__ == "__main__":
     train_df, val_df, num_classes = get_data("/home/jmar/IMDB Dataset.csv")
 
     # Initialize the tokenizer and the plain BERT model
-    tokenizer = AutoTokenizer.from_pretrained("google/mobilebert-uncased")
-    bert_model = AutoModel.from_pretrained("google/mobilebert-uncased").to(device)
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    bert_model = AutoModel.from_pretrained("bert-base-uncased").to(device)
     
     # Create dataloaders
     val_loader = create_dataloader(val_df, tokenizer, bert_model, device, batch_size=16, pooling_strategy="mean", shuffle=False)
