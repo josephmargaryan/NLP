@@ -16,17 +16,8 @@ from torch.utils.data import Dataset, DataLoader
 
 
 def get_data(path, max_count=2000, min_count=250):
-    dataframes = []
-    for folder in tqdm(os.listdir(path), desc="Iterating through root"):
-        folder_path = os.path.join(path, folder)
-        for file in tqdm(os.listdir(folder_path), desc="Iterating through folder"):
-            if file.endswith(".parquet"):
-                df = pd.read_parquet(os.path.join(folder_path, file))
-                dataframes.append(df)
-    df = pd.concat(dataframes, axis=0)
-    df = df.dropna(subset=["type__v", "subtype__v", "classification__v"])
-    df = df.loc[~df["text"].isna()]
-    df = df[df["text"].apply(lambda x: len(str(x)) > 10)]
+    df = pd.read_csv(path).head(100)
+
 
     def clean_text(text):
         text = text.lower()
@@ -47,31 +38,16 @@ def get_data(path, max_count=2000, min_count=250):
         
         return text
 
-    df['x'] = df['text'].apply(clean_text)
-    class_counts = df["classification__v"].value_counts()
-    filtered_classes = class_counts[class_counts >= min_count].index
-    df.loc[~df["classification__v"].isin(filtered_classes), "classification__v"] = "UNKNOWN"
-    class_counts = df["classification__v"].value_counts()
-    balanced_dfs = []
-
-    for class_name, count in class_counts.items():
-        class_df = df[df["classification__v"] == class_name]
-        
-        if count > max_count:
-            class_df = class_df.sample(max_count, random_state=42)
-
-        balanced_dfs.append(class_df)
-
-    balanced_df = pd.concat(balanced_dfs)
+    df['x'] = df['review'].apply(clean_text)
 
     le = LabelEncoder()
-    balanced_df["y"] = le.fit_transform(balanced_df["classification__v"])
+    df["y"] = le.fit_transform(df["sentiment"])
     num_classes = len(le.classes_)
 
     with open("label_encoder.pkl", "wb") as f:
         pickle.dump(le, f)
     
-    train_df,  val_df = train_test_split(balanced_df, test_size=0.2)
+    train_df,  val_df = train_test_split(df, test_size=0.2)
     return train_df, val_df, num_classes
 
 class HierarchicalDataset(Dataset):
@@ -267,23 +243,23 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Load and prepare the dataset
-    train_df, val_df, num_classes = get_data("/path/to/data")
+    train_df, val_df, num_classes = get_data("/home/jmar/IMDB Dataset.csv")
 
     # Initialize the tokenizer and the plain BERT model
-    tokenizer = AutoTokenizer.from_pretrained('bert-base-multilingual-cased')
-    bert_model = AutoModel.from_pretrained('bert-base-multilingual-cased').to(device)
+    tokenizer = AutoTokenizer.from_pretrained("google/mobilebert-uncased")
+    bert_model = AutoModel.from_pretrained("google/mobilebert-uncased").to(device)
     
     # Initialize the document classifier model
     hidden_size = bert_model.config.hidden_size  # Get the hidden size from the BERT model config
     classifier = DocumentClassifier(hidden_size=hidden_size, num_labels=num_classes).to(device)
     
     # Create dataloaders
-    train_loader = create_dataloader(train_df, tokenizer, bert_model, device, batch_size=16, pooling_strategy="mean", shuffle=True)
-    val_loader = create_dataloader(val_df, tokenizer, bert_model, device, batch_size=16, pooling_strategy="mean", shuffle=False)
+    train_loader = create_dataloader(train_df, tokenizer, bert_model, device, batch_size=16, pooling_strategy="self_attention", shuffle=True)
+    val_loader = create_dataloader(val_df, tokenizer, bert_model, device, batch_size=16, pooling_strategy="self_attention", shuffle=False)
 
     # Train the model
     train(classifier,
-          num_epochs=100,
+          num_epochs=10,
           train_loader=train_loader,
           val_loader=val_loader,
           lr=1e-4,
@@ -291,5 +267,4 @@ if __name__ == "__main__":
           patience=3,
           device=device
           )
-
 
