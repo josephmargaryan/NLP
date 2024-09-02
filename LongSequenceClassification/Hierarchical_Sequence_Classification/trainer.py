@@ -267,7 +267,7 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # Load and prepare the dataset
-    train_df, val_df, num_classes = get_data("/data-disk/scraping-output/icon")
+    train_df, val_df, num_classes = get_data("/path/to/data")
 
     # Initialize the tokenizer and the plain BERT model
     tokenizer = AutoTokenizer.from_pretrained('bert-base-multilingual-cased')
