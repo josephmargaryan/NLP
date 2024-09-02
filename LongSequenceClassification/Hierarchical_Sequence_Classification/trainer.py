@@ -246,8 +246,8 @@ if __name__ == "__main__":
     train_df, val_df, num_classes = get_data("/home/jmar/IMDB Dataset.csv")
 
     # Initialize the tokenizer and the plain BERT model
-    tokenizer = AutoTokenizer.from_pretrained("google/mobilebert-uncased")
-    bert_model = AutoModel.from_pretrained("google/mobilebert-uncased").to(device)
+    tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
+    bert_model = AutoModel.from_pretrained("google-bert/bert-base-uncased").to(device)
     
     # Initialize the document classifier model
     hidden_size = bert_model.config.hidden_size  # Get the hidden size from the BERT model config
