@@ -13,6 +13,8 @@ from sklearn.preprocessing import LabelEncoder
 import torch.nn.functional as F
 from sklearn.metrics import f1_score, accuracy_score
 from torch.utils.data import Dataset, DataLoader
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 
 def get_data(path):
@@ -199,4 +201,9 @@ if __name__ == "__main__":
     doc1 = document_list[max_sim_indices[0]]
     doc2 = document_list[max_sim_indices[1]]
     print(f"The most similar documents are:\nDocument 1: {doc1}\nDocument 2: {doc2}")
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(similarity_matrix.cpu().numpy(), cmap="coolwarm", annot=False)
+    plt.title("Document Cosine Similarity Matrix")
+    plt.show()
 
