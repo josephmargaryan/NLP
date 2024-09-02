@@ -264,7 +264,7 @@ class Head_Tail_Training:
 if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained('google-bert/bert-base-multilingual-cased')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    path = "/data-disk/scraping-output/icon"
+    path = "/path/to/data"
     trainer = Head_Tail_Training(path=path,
                                  tokenizer=tokenizer,
                                  device=device)
