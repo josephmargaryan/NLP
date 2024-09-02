@@ -1,186 +1,128 @@
 import torch
-import torch.nn as nn
 import pandas as pd
+from transformers import AutoTokenizer, AutoModel
 import numpy as np
-import re
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from tqdm import tqdm
 import umap
 import matplotlib.pyplot as plt
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score, f1_score
+from tqdm import tqdm
 import seaborn as sns
-from sklearn.metrics.pairwise import cosine_similarity
 from mpl_toolkits.mplot3d import Axes3D
 
-class HeadTailEmbeddingVisualizer:
-    def __init__(self, model_path, tokenizer_name, device, path_to_data, path_to_le):
-        self.model = AutoModelForSequenceClassification.from_pretrained(tokenizer_name, num_labels=206, output_hidden_states=True)
-        self.model.load_state_dict(torch.load(model_path))
-        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        self.device = device
-        self.path_to_data = path_to_data
-        self.model.to(self.device)
-        self.model.eval()
-        with open(path_to_le, "rb") as f:
-            self.le = pickle.load(f)
-
-    def load_data(self):
-        """
-        Takes the file path with the parquet files, concatenates them, and removes documents with non-manual classification.
-        """
-        out_folder = self.path_to_data
-        regex = ".parquet"
-
-        folders = os.listdir(out_folder)
-        dataframes = []
-        for folder in folders:
-            folder_path = os.path.join(out_folder, folder)
-            if os.path.isdir(folder_path):
-                files = os.listdir(folder_path)
-                for file in tqdm(files, desc=f"Processing files in {folder}", unit="file"):
-                    if file.endswith(regex):
-                        file_path = os.path.join(folder_path, file)
-                        df = pd.read_parquet(file_path)
-                        dataframes.append(df)
-
-        df = pd.concat(dataframes, axis=0) 
-        print(f"Length before filtering {len(df)}")
-        df.reset_index(drop=True, inplace=True)
-        df = df.loc[~df["text"].isna(), :]
-        df = df[df["text"].apply(lambda x: len(str(x)) > 10)]
-        df = df.loc[~df["CLASSIFICATION"].isna(), :]
-        print(f"Number of samples with manual classification {len(df)}")
-        df["x"] = df["text"]
-        try:
-            df["y"] = self.le.transform(df["CLASSIFICATION"])
-        except ValueError as e:
-            print(f"Handling unseen labels: {e}")
-            df["y"] = df["CLASSIFICATION"].apply(lambda x: self.le.transform([x])[0] if x in self.le.classes_ else -1)
+def process_document(text, tokenizer, model, chunk_size=510, pooling_strategy="mean"):
+    tokens = tokenizer(text, add_special_tokens=False, return_tensors='pt')['input_ids'].squeeze(0)
     
-        
-        return df.iloc[0:31, :]
-        
-    def preprocess_data(self):
-        df = self.load_data()
-        def clean_text(text):
-            text = text.lower()
-            text = re.sub(r"http\S+|www\S+", '', text, flags=re.MULTILINE)
-            text = re.sub(r'<.*?>', '', text)
-            text = re.sub(r"[^a-zA-Z0-9?.!,¿]+", " ", text)
-            text = re.sub(r'\s+', ' ', text).strip()
-            emoji_pattern = re.compile("["
-                                    u"\U0001F600-\U0001F64F"  
-                                    u"\U0001F300-\U0001F5FF" 
-                                    u"\U0001F680-\U0001F6FF"  
-                                    u"\U0001F1E0-\U0001F1FF"  
-                                    u"\U00002702-\U000027B0"
-                                    u"\U000024C2-\U0001F251"
-                                    "]+", flags=re.UNICODE)
-            text = emoji_pattern.sub(r'', text)
-            
-            return text
+    if tokens.size(0) == 0:  # If no tokens are generated
+        tokens = torch.tensor([tokenizer.unk_token_id])  # Use UNK token as placeholder
 
-        df['x'] = df['x'].apply(clean_text)
-        return df
+    # Split the tokens into chunks
+    chunks = [tokens[i:i + (chunk_size - 2)] for i in range(0, len(tokens), chunk_size - 2)]
+    
+    padded_chunks = []
+    for chunk in chunks:
+        chunk = torch.cat([
+            torch.tensor([tokenizer.cls_token_id]),  # CLS token at the start
+            chunk,
+            torch.tensor([tokenizer.sep_token_id])  # SEP token at the end
+        ])
 
-    def tokenize_and_select(self, text, first_tokens=128, last_tokens=382):
-        tokens = self.tokenizer(text, return_tensors='pt', truncation=False, padding=False)
-        input_ids = tokens['input_ids'].squeeze()
+        # Padding if needed
+        padding_length = chunk_size - chunk.size(0)
+        if padding_length > 0:
+            chunk = torch.cat((chunk, torch.full((padding_length,), tokenizer.pad_token_id)))
 
-        # If the input sequence is shorter than 510 tokens, pad it to the required length
-        if input_ids.size(0) <= first_tokens + last_tokens:
-            padding_length = (first_tokens + last_tokens) - input_ids.size(0)
-            selected_ids = torch.cat([input_ids, torch.zeros(padding_length, dtype=torch.long)])
-            attention_mask = torch.cat([torch.ones(input_ids.size(0), dtype=torch.long), torch.zeros(padding_length, dtype=torch.long)])
-        else:
-            # Select the first 128 and last 382 tokens
-            selected_ids = torch.cat([input_ids[:first_tokens], input_ids[-last_tokens:]])
-            attention_mask = torch.ones_like(selected_ids)
+        padded_chunks.append(chunk)
 
-        return selected_ids, attention_mask
+    input_ids = torch.stack(padded_chunks).to(model.device)
+    attention_mask = (input_ids != tokenizer.pad_token_id).long().to(model.device)
 
+    # Pass each chunk through the model
+    with torch.no_grad():
+        cls_embeddings = []
+        for i in range(input_ids.size(0)):
+            outputs = model(input_ids[i].unsqueeze(0), attention_mask=attention_mask[i].unsqueeze(0))
+            cls_embeddings.append(outputs.last_hidden_state[:, 0, :])  # CLS token embedding
 
-    def generate_embeddings(self):
-        df = self.preprocess_data()
-        embeddings = []
-        valid_indices = []
+    cls_embeddings = torch.cat(cls_embeddings, dim=0)
 
-        for idx, text in enumerate(tqdm(df['x'], desc="Generating embeddings", unit="text")):
-            input_ids, attention_mask = self.tokenize_and_select(text)
-            if input_ids is None:
-                continue  # Skip this text if it doesn't generate a valid embedding
+    # Pooling
+    if pooling_strategy == "mean":
+        document_representation = torch.mean(cls_embeddings, dim=0)
+    elif pooling_strategy == "max":
+        document_representation = torch.max(cls_embeddings, dim=0)[0]
+    elif pooling_strategy == "self_attention":
+        attn_weights = torch.softmax(torch.mm(cls_embeddings, cls_embeddings.transpose(0, 1)), dim=-1)
+        document_representation = torch.mm(attn_weights, cls_embeddings).mean(0)
+    else:
+        raise ValueError(f"Unknown pooling strategy: {pooling_strategy}")
 
-            valid_indices.append(idx)
-            input_ids = input_ids.unsqueeze(0).to(self.device)
-            attention_mask = attention_mask.unsqueeze(0).to(self.device)
+    return document_representation.cpu().numpy()
 
-            with torch.no_grad():
-                output = self.model(input_ids=input_ids, attention_mask=attention_mask)
-                hidden_states = output.hidden_states  # Get all hidden states
-                pooled_output = hidden_states[-1][:, 0, :]  # Use the last layer's [CLS] token embedding
-                embeddings.append(pooled_output.cpu().numpy().flatten())
+def extract_embeddings(df, tokenizer, model, pooling_strategy="mean"):
+    embeddings = []
+    for text in tqdm(df["x"].tolist(), desc="Processing documents"):
+        embedding = process_document(text, tokenizer, model, pooling_strategy=pooling_strategy)
+        embeddings.append(embedding)
+    return np.array(embeddings)
 
-        embeddings_np = np.array(embeddings)
-        filtered_df = df.iloc[valid_indices].reset_index(drop=True)  # Keep only rows with valid embeddings
-        return filtered_df, embeddings_np
+def apply_umap(embeddings, n_components=2):
+    reducer = umap.UMAP(n_components=n_components)
+    embedding_umap = reducer.fit_transform(embeddings)
+    return embedding_umap
 
+def plot_embeddings_2d(embedding_umap_2d, labels):
+    plt.figure(figsize=(10, 8))
+    sns.scatterplot(
+        x=embedding_umap_2d[:, 0], 
+        y=embedding_umap_2d[:, 1], 
+        hue=labels, 
+        palette="viridis",
+        s=100,
+        alpha=0.8
+    )
+    plt.title("2D UMAP of Document Embeddings")
+    plt.xlabel("UMAP Dimension 1")
+    plt.ylabel("UMAP Dimension 2")
+    plt.legend()
+    plt.show()
 
-    def reduce_dimensions(self, embeddings, n_components=2):
-        reducer = umap.UMAP(n_components=n_components, random_state=42)
-        reduced_embeddings = reducer.fit_transform(embeddings)
-        return reduced_embeddings
-
-    def plot_embeddings(self, reduced_embeddings, n_components=2):
-        filtered_df, _ = self.generate_embeddings()
-        
-        # Use inverse_transform to get the label names
-        label_names = self.le.inverse_transform(filtered_df['y'])
-
-        if n_components == 2:
-            plt.figure(figsize=(12, 8))
-            sns.scatterplot(x=reduced_embeddings[:, 0], y=reduced_embeddings[:, 1], hue=label_names, palette="deep")
-            plt.title("UMAP projection of Document Embeddings (2D)")
-            plt.show()
-        elif n_components == 3:
-            fig = plt.figure(figsize=(12, 8))
-            ax = fig.add_subplot(111, projection='3d')
-            scatter = ax.scatter(reduced_embeddings[:, 0], reduced_embeddings[:, 1], reduced_embeddings[:, 2], c=label_names, cmap="viridis")
-            ax.set_title("UMAP projection of Document Embeddings (3D)")
-            plt.colorbar(scatter)
-            plt.show()
-
-
-    def find_similar_documents(self, embeddings, target_index, top_n=5):
-        target_embedding = embeddings[target_index].reshape(1, -1)
-        similarities = cosine_similarity(target_embedding, embeddings).flatten()
-        similar_indices = similarities.argsort()[-top_n-1:-1][::-1]
-        return similar_indices, similarities[similar_indices]
-
-    def visualize_and_find_similar(self, n_components=2, target_index=None, top_n=5):
-        df, embeddings = self.generate_embeddings()
-        reduced_embeddings = self.reduce_dimensions(embeddings, n_components=n_components)
-        self.plot_embeddings(reduced_embeddings, n_components=n_components)
-        
-        if target_index is not None:
-            similar_indices, similarities = self.find_similar_documents(embeddings, target_index, top_n)
-            similar_docs = df.iloc[similar_indices]
-            print(f"Similar documents to index {target_index} (similarity scores):")
-            for i, (idx, sim) in enumerate(zip(similar_indices, similarities)):
-                print(f"Rank {i+1}: Document index {idx}, Similarity: {sim:.4f}")
-                print(f"Text: {similar_docs['x'].iloc[i]}\n")
-            return similar_docs, similarities
-
+def plot_embeddings_3d(embedding_umap_3d, labels):
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='3d')
+    scatter = ax.scatter(
+        embedding_umap_3d[:, 0], 
+        embedding_umap_3d[:, 1], 
+        embedding_umap_3d[:, 2], 
+        c=labels, 
+        cmap='viridis', 
+        s=100,
+        alpha=0.8
+    )
+    ax.set_title("3D UMAP of Document Embeddings")
+    ax.set_xlabel("UMAP Dimension 1")
+    ax.set_ylabel("UMAP Dimension 2")
+    ax.set_zlabel("UMAP Dimension 3")
+    plt.colorbar(scatter)
+    plt.show()
 
 if __name__ == "__main__":
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    visualizer = HeadTailEmbeddingVisualizer(
-        model_path="/home/jmar/Head_Tail_Method/best_model.pth", 
-        tokenizer_name="google-bert/bert-base-multilingual-cased",  
-        device=device,
-        path_to_data="/path/to/data",
-        path_to_le="/home/jmar/Head_Tail_Method/label_encoder.pkl"
-    )
 
-    visualizer.visualize_and_find_similar(n_components=2, target_index=0, top_n=5)
+    # Initialize tokenizer and model
+    tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+    model = AutoModel.from_pretrained('bert-base-uncased').to('cuda' if torch.cuda.is_available() else 'cpu')
 
+    # Extract embeddings
+    df_embeddings = extract_embeddings(df_short, tokenizer, model, pooling_strategy="mean")
+
+    # Apply UMAP for 2D and 3D visualizations
+    embedding_umap_2d = apply_umap(df_embeddings, n_components=2)
+    embedding_umap_3d = apply_umap(df_embeddings, n_components=3)
+
+    encoded_labels = df_short["y"]
+
+    # Plot 2D and 3D embeddings
+    plot_embeddings_2d(embedding_umap_2d, encoded_labels)
+    plot_embeddings_3d(embedding_umap_3d, encoded_labels)
 
