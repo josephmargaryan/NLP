@@ -177,7 +177,7 @@ if __name__ == "__main__":
         model_path="/home/jmar/Head_Tail_Method/best_model.pth", 
         tokenizer_name="google-bert/bert-base-multilingual-cased",  
         device=device,
-        path_to_data="/data-disk/scraping-output/p-drive-structured",
+        path_to_data="/path/to/data",
         path_to_le="/home/jmar/Head_Tail_Method/label_encoder.pkl"
     )
 
