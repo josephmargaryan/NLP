@@ -11,7 +11,8 @@ from tqdm import tqdm
 import os
 from sklearn.preprocessing import LabelEncoder
 import pickle
-from sklearn.metrics import f1_score, accuracy_score, classification_report
+from sklearn.metrics import f1_score, accuracy_score
+import transformers
 
 class Head_Tail_Training:
     def __init__(self, path, tokenizer, device):
@@ -22,19 +23,8 @@ class Head_Tail_Training:
 
     def load_data(self):
 
-        dataframes = []
-        for folder in tqdm(os.listdir(self.path), desc="Processing folders {folder}"):
-            folder_path = os.path.join(self.path, folder)
-            for file in os.listdir(folder_path):
-                if file.endswith(".parquet"):
-                    file_name = os.path.join(folder_path, file)
-                    df = pd.read_parquet(file_name)
-                    dataframes.append(df)
-        final_df = pd.concat(dataframes, axis=0)
-        final_df = final_df.dropna(subset=["type__v", "subtype__v", "classification__v"])
-        final_df = final_df.loc[~final_df["text"].isna()]
-        
-        return final_df
+        df = pd.read_csv(self.path)
+        return df.iloc[0:1000, :]
 
     def preprocess_data(self):
         df = self.load_data()
@@ -57,70 +47,52 @@ class Head_Tail_Training:
             
             return text
 
-        df['x'] = df['text'].apply(clean_text)
+        df['x'] = df['review'].apply(clean_text)
         return df
     
 
 
-    def labelencode(self, max_count=2000, min_count=250):
+    def labelencode(self):
         print(f"Beginning Label Encoding")
  
         df = self.preprocess_data()
-
-        class_counts = df["classification__v"].value_counts()
-
-        filtered_classes = class_counts[class_counts >= min_count].index
-        df.loc[~df["classification__v"].isin(filtered_classes), "classification__v"] = "UNKNOWN"
-
-        class_counts = df["classification__v"].value_counts()
-        
-        balanced_dfs = []
-
-        for class_name, count in class_counts.items():
-            class_df = df[df["classification__v"] == class_name]
-            
-            if count > max_count:
-                class_df = class_df.sample(max_count, random_state=42)
-
-            balanced_dfs.append(class_df)
-
-        balanced_df = pd.concat(balanced_dfs)
- 
         le = LabelEncoder()
-        balanced_df["y"] = le.fit_transform(balanced_df["classification__v"])
+        df["y"] = le.fit_transform(df["sentiment"])
         num_classes = len(le.classes_)
 
         with open("label_encoder.pkl", "wb") as f:
             pickle.dump(le, f)
 
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            'google-bert/bert-base-multilingual-cased',
+            "google-bert/bert-base-uncased",
             num_labels=num_classes).to(self.device)
         
-        return balanced_df
+        return df
 
     
     def tokenize(self):
         print("beginning tokenization")
-        def tokenize_and_select(text, tokenizer, first_tokens=128, last_tokens=382):
-            tokens = tokenizer(text, return_tensors='pt', truncation=False, padding=False)
-            input_ids = tokens['input_ids'].squeeze()
-        
-            # Adjust in case the document is shorter than the expected token count
-            if len(input_ids) < first_tokens + last_tokens:
-                selected_ids = input_ids
+        def tokenize_and_select(text, tokenizer, max_length=512, first_tokens=128, last_tokens=382):
+            tokens = tokenizer(text, add_special_tokens=False)  # Initially without special tokens
+            input_ids = tokens['input_ids']
+
+            # Adjusting to add CLS at the beginning and SEP at the end within the maximum length limit
+            if len(input_ids) > (max_length - 2):  # Reserve spaces for CLS and SEP
+                input_ids = input_ids[:first_tokens] + input_ids[-last_tokens:]
+                input_ids = [tokenizer.cls_token_id] + input_ids + [tokenizer.sep_token_id]
             else:
-                selected_ids = torch.cat([input_ids[:first_tokens], input_ids[-last_tokens:]])
-        
-            attention_mask = torch.ones_like(selected_ids)
-        
-            # Pad if necessary to ensure the sequence is of the correct length
-            if selected_ids.size(0) < (first_tokens + last_tokens):
-                padding_length = (first_tokens + last_tokens) - selected_ids.size(0)
-                selected_ids = torch.cat([selected_ids, torch.zeros(padding_length, dtype=torch.long)])
-                attention_mask = torch.cat([attention_mask, torch.zeros(padding_length, dtype=torch.long)])
-        
-            return selected_ids, attention_mask
+                input_ids = [tokenizer.cls_token_id] + input_ids + [tokenizer.sep_token_id]
+
+            attention_mask = [1] * len(input_ids)
+
+            # Padding
+            if len(input_ids) < max_length:
+                padding_length = max_length - len(input_ids)
+                input_ids += [tokenizer.pad_token_id] * padding_length
+                attention_mask += [0] * padding_length
+
+            assert len(input_ids) == max_length, "Error in sequence length calculation."
+            return torch.tensor(input_ids), torch.tensor(attention_mask)
 
         
         df = self.labelencode()
@@ -268,10 +240,10 @@ class Head_Tail_Training:
             torch.save(best_model_state, "best_model.pth")
 
 if __name__ == "__main__":
-    tokenizer = AutoTokenizer.from_pretrained('google-bert/bert-base-multilingual-cased')
+    tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    path = "/path/to/data"
+    path = "/kaggle/input/imdb-dataset-of-50k-movie-reviews/IMDB Dataset.csv"
     trainer = Head_Tail_Training(path=path,
                                  tokenizer=tokenizer,
                                  device=device)
-    trainer.train(num_epochs=100, lr=2e-5)
+    trainer.train(num_epochs=10, lr=2e-5)
