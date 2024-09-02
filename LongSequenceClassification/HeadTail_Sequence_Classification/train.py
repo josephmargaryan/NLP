@@ -105,17 +105,23 @@ class Head_Tail_Training:
         def tokenize_and_select(text, tokenizer, first_tokens=128, last_tokens=382):
             tokens = tokenizer(text, return_tensors='pt', truncation=False, padding=False)
             input_ids = tokens['input_ids'].squeeze()
-
-            selected_ids = torch.cat([input_ids[:first_tokens], input_ids[-last_tokens:]])
-
+        
+            # Adjust in case the document is shorter than the expected token count
+            if len(input_ids) < first_tokens + last_tokens:
+                selected_ids = input_ids
+            else:
+                selected_ids = torch.cat([input_ids[:first_tokens], input_ids[-last_tokens:]])
+        
             attention_mask = torch.ones_like(selected_ids)
-
+        
+            # Pad if necessary to ensure the sequence is of the correct length
             if selected_ids.size(0) < (first_tokens + last_tokens):
                 padding_length = (first_tokens + last_tokens) - selected_ids.size(0)
                 selected_ids = torch.cat([selected_ids, torch.zeros(padding_length, dtype=torch.long)])
                 attention_mask = torch.cat([attention_mask, torch.zeros(padding_length, dtype=torch.long)])
-
+        
             return selected_ids, attention_mask
+
         
         df = self.labelencode()
         df[['input_ids', 'attention_mask']] = df['x'].apply(lambda x: tokenize_and_select(x, self.tokenizer)).apply(pd.Series)
