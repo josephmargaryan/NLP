@@ -238,6 +238,7 @@ def similarity_engine_single_record(
 
 if __name__ == "__main__":
     # Use configurations with caution as it wil crash due to being computationally expensive
+    # Here we compare each row wih each row
     result_df = similarity_engine(
         df_csv=csv_matched.head(),
         df_excel=matched_excel.head(),
@@ -253,7 +254,8 @@ if __name__ == "__main__":
     )
     print(result_df.head())
 
-    single_record = matched_excel.iloc[0]
+    # Here we compare 1 record with every row
+    single_record = matched_excel.iloc[0, :]
     result_df = similarity_engine_single_record(
         record=single_record,
         df_target=csv_matched,
@@ -268,3 +270,29 @@ if __name__ == "__main__":
         match_threshold=70,
     )
     print(result_df.head())
+
+    # Here we compare mulitple records with every row
+    result_dfs = []
+
+    for i in range(len(matched_excel.iloc[0:3, :])):
+        single_record = matched_excel.iloc[i]
+
+        result_df = similarity_engine_single_record(
+            record=single_record,
+            df_target=csv_matched,
+            use_first_name=True,
+            use_last_name=True,
+            use_specialty=False,
+            use_address_fuzzy=True,
+            use_address_cosine=False,
+            use_phone=True,
+            use_country=False,
+            use_email=False,
+            match_threshold=70,
+        )
+
+        result_dfs.append(result_df)
+
+    final_result_df = pd.concat(result_dfs)
+
+    print(final_result_df.head())
