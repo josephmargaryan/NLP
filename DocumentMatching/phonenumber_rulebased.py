@@ -1,0 +1,108 @@
+import pandas as pd
+import re
+from preprocess import matched_excel, csv_matched, unmatched_excel, csv_unmatched
+
+
+import re
+import pandas as pd
+
+
+def standardize_phone_number(phone):
+    """
+    Standardizes a phone number by removing non-numeric characters and ensuring consistent formatting.
+
+    It retains the country code if present, especially for cases like +20 (Egypt).
+
+    If the phone is None or not a valid string, it returns None.
+
+    Params:
+    - phone (str): The phone number to standardize.
+
+    Returns:
+    - str: The standardized phone number or None if input is invalid.
+    """
+    if pd.isna(phone) or not isinstance(phone, str):
+        return None  # Return None if the input is NaN or not a valid string
+
+    # Remove non-numeric characters except for the leading '+'
+    phone = re.sub(r"[^\d+]", "", phone)
+
+    # Handle leading '+' for country codes
+    if phone.startswith("+"):
+        phone = phone[1:]  # Remove the '+' but retain the country code
+
+    # Handle specific case of leading '0' in local numbers (e.g., '020...' becomes '20...')
+    if phone.startswith("0"):
+        phone = phone[1:]
+
+    return phone
+
+
+def phone_number_rule_based(df_csv, df_excel):
+    """
+    Rule-based matching of phone numbers between systems.
+
+    Params:
+    - df_csv (DataFrame): CSV data containing 'phone_1__v'.
+    - df_excel (DataFrame): Excel data containing 'PHONE'.
+
+    Returns:
+    - merged_df (DataFrame): Merged DataFrame containing phone number match score.
+    """
+    df_excel = df_excel.copy()
+    df_csv = df_csv.copy()
+
+    # Standardize phone numbers using the custom standardization function
+    df_excel["PHONE"] = df_excel["PHONE"].apply(
+        lambda x: standardize_phone_number(str(x))
+    )
+    df_csv["phone_1__v"] = df_csv["phone_1__v"].apply(
+        lambda x: standardize_phone_number(str(x))
+    )
+
+    # Merge and compute exact match
+    merged_df = pd.merge(
+        df_csv,
+        df_excel[["VID", "PHONE"]],
+        left_on="vid__v",
+        right_on="VID",
+        how="inner",
+    )
+    merged_df["phone_match"] = merged_df.apply(
+        lambda row: 100 if row["phone_1__v"] == row["PHONE"] else 0, axis=1
+    )
+
+    return merged_df[["vid__v", "phone_1__v", "PHONE", "phone_match"]]
+
+
+def phone_number_rule_based_single(record, df_target):
+    """
+    Rule-based matching of phone numbers for a single record against all rows in the target dataframe.
+
+    Params:
+    - record (Series): A single record containing the 'PHONE' field.
+    - df_target (DataFrame): Target dataframe containing the 'phone_1__v' field.
+
+    Returns:
+    - result_df (DataFrame): DataFrame containing phone number match scores.
+    """
+    phone_record = standardize_phone_number(str(record["PHONE"]))
+
+    df_target = df_target.copy()
+    df_target["phone_1__v"] = df_target["phone_1__v"].apply(
+        lambda x: standardize_phone_number(str(x))
+    )
+
+    df_target["phone_match"] = df_target.apply(
+        lambda row: 100 if row["phone_1__v"] == phone_record else 0, axis=1
+    )
+
+    return df_target[["vid__v", "phone_1__v", "phone_match"]]
+
+
+if __name__ == "__main__":
+    print(
+        phone_number_rule_based(csv_matched, matched_excel)[
+            "phone_match"
+        ].value_counts()
+    )
