@@ -1,10 +1,6 @@
 import matplotlib.pyplot as plt
 import pandas as pd
-
-
 import os
-import matplotlib.pyplot as plt
-
 
 class SimilarityVisualizer:
     def __init__(self, similarity_results, output_folder="visualizations"):
