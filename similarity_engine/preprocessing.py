@@ -264,4 +264,4 @@ def get_dataframes(config_path):
 
 
 if __name__ == "__main__":
-    """source_df, target_df, merged_df = get_dataframes("/path/to/preprocess_config.yml")"""
+    """source_df, target_df, merged_df = Preprocessing("/path/to/preprocess_config.yml")"""
