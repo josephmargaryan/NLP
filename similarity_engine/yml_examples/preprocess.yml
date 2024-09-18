@@ -1,4 +1,4 @@
-data_path: "/home/jmar/matching_project/data"
+data_path: "/path/to/data_files"
 source_data_extension: ".csv"
 target_data_extension: ".xlsx"
 nan_threshold: 0.9
