@@ -1,0 +1,29 @@
+data_path: "/home/jmar/matching_project/data"
+source_data_extension: ".xlsx"
+target_data_extension: ".csv"
+nan_threshold: 0.9
+source_id_column: "VID"
+target_id_column: "vid__v"
+
+source_address_columns:
+  - "ADDR1"
+  - "CITY"
+  - "ADMIN_AREA"
+  - "POSTALCODE"
+  - "COUNTRY"
+
+target_address_columns:
+  - "address_line_1__v"
+  - "address_line_2__v"
+  - "locality__v"
+  - "postal_code__v"
+  - "country__v"
+
+source_df_email: "EMAIL"
+target_df_email: "email_1__v"
+
+source_data_phonenumber: "PHONE"
+target_data_phonenumber: "phone_1__v"
+
+source_df_last_name: "LAST_NAME"
+target_df_last_name: "last_name__v"
