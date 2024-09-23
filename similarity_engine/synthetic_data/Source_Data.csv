@@ -1,4 +1,0 @@
-id,first_name__v,last_name__v,address_full,cleaned_phonenumber,country__v,cleaned_email,type,specialty_1_label
-1,John,Doe,123 Elm St,1234567890,USA,john.doe@example.com,Doctor,Cardiology
-2,Jane,Smith,456 Maple Ave,9876543210,Canada,jane.smith@example.com,Nurse,Pediatrics
-3,Alice,Johnson,789 Oak Dr,5555555555,USA,alice.johnson@example.com,Physician,Neurology

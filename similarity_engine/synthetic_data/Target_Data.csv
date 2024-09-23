@@ -1,4 +1,0 @@
-id,FIRST_NAME,LAST_NAME,address_full,cleaned_phonenumber,COUNTRY,cleaned_email,HCP_TYPE_V__LABEL,SPCLTY1
-1001,Jon,Dough,123 Elm Street,1234567890,USA,john.doe@example.com,Doctor,Cardiology
-1002,Janet,Smyth,456 Maple Street,9876543211,Canada,jane.smith@domain.com,Nurse,Pediatrics
-1003,Alicia,Johnsson,789 Oak Road,5555555555,USA,alice.johnson@company.com,Physician,Neurology
