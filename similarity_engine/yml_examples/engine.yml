@@ -18,6 +18,7 @@ weights:
   last_name_similarity: 0.55
   type_similarity: 0.05
   subtype_similarity: 0.05
+  address_fuzzy_similarity: 0.00
 
 match_threshold: 72
 
