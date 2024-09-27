@@ -4,7 +4,6 @@
 submodules:
   use_first_name: true
   use_last_name: true
-  use_specialty: true
   use_address_fuzzy: false
   use_address_cosine: false
   use_phone: true # Binary match
