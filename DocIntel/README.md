@@ -33,6 +33,7 @@
 - Install dependencies via `pip`:
 
 ```bash
+brew install tesseract
 sudo apt-get install tesseract-ocr
 pip install -r requirements.txt
 
