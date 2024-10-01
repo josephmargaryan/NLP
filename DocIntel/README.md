@@ -34,3 +34,7 @@
 
 ```bash
 pip install -r requirements.txt
+
+### **D**
+sudo apt-get install tesseract-ocr
+
