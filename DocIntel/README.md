@@ -54,34 +54,40 @@ pip install pymupdf pillow pytesseract transformers python-docx
 ```
 ### **Tesseract Setup**
 To enable OCR capabilities, you will need to install Tesseract OCR. On most Linux-based systems:
+```
 sudo apt-get install tesseract-ocr
+```
 
 on mac(using homebrew)
+```
 brew install tesseract
+```
 
 ## **Usage**
 - **PDF to Images and Text Extraction**
 Here are some basic usage examples to get started:
+```
 from docintel.document_converter import DocumentConverter
 
 converter = DocumentConverter("sample.pdf")
 converted_data = converter.convert()
 print(converted_data['text'])  # Extracted text from PDF
-
+```
 - **Image OCR with Layout Information**
+```
 from docintel.ocr_layout import OCRLayoutAnalyzer
 
 analyzer = OCRLayoutAnalyzer("sample_image.png")
 layout_data = analyzer.extract_text_with_layout()
 print(layout_data)
-
+```
 - **Advanced Layout Analysis using LayoutLMv3**
 from docintel.advanced_layout import AdvancedLayoutAnalyzer
-
+```
 layout_analyzer = AdvancedLayoutAnalyzer()
 layout_info = layout_analyzer.analyze_document("sample_image.png")
 print(layout_info)
-
+```
 ### **Configuration**
 DocIntel allows you to configure various components such as OCR engines, output directories, and document formats. You can extend or customize this configuration as per your requirements.
 
