@@ -1,0 +1,5 @@
+pymupdf==1.21.1   # For PDF processing (PyMuPDF)
+Pillow==9.3.0     # For image processing
+pytesseract==0.3.10  # For OCR with Tesseract
+transformers==4.21.1  # For NLP tasks (Hugging Face Transformers)
+python-docx==0.8.11  # For DOCX file handling
