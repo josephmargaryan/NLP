@@ -33,8 +33,8 @@
 - Install dependencies via `pip`:
 
 ```bash
+sudo apt-get install tesseract-ocr
 pip install -r requirements.txt
 
-### **D**
-sudo apt-get install tesseract-ocr
+
 
