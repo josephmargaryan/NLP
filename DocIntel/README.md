@@ -50,7 +50,7 @@ The following Python packages are required to run DocIntel:
 
 Install these dependencies using:
 ```
-pip install pymupdf pillow pytesseract transformers python-docx
+pip install pymupdf pillow pytesseract transformers python-docx torchvision
 ```
 ### **Tesseract Setup**
 To enable OCR capabilities, you will need to install Tesseract OCR. On most Linux-based systems:
