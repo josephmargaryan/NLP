@@ -96,6 +96,13 @@ DocIntel allows you to configure various components such as OCR engines, output 
 - **OCR and Layout Analysis: Extracts text from images and PDFs, along with bounding boxes for layout analysis.**
 - **ML and NLP Pipelines: Uses Hugging Face’s transformer models for advanced text analysis like summarization, question answering, and text generation.**
 
+### **How it works together**
+- **Convert the document (e.g., PDF to PNG).**
+- **Extract the text using OCR while preserving layout and structure with bounding boxes.**
+- **Use the bounding boxes to segment and focus on specific parts of the document (like tables or headers).**
+- **Optionally, train models (like LayoutLMv3) to recognize patterns and automatically extract key fields (e.g., names, dates, monetary values).**
+- **Deploy the tool in real-world scenarios where it can automate document processing, from legal contracts to financial statements, extracting key information with high precision.**
+
 ### **Roadmap**
 - **Extend support for .pptx, .xlsx, and other document formats.**
 - **Integrate with cloud-based OCR APIs (Google Cloud Vision, AWS Textract).**
