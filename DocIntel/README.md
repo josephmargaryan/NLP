@@ -46,17 +46,20 @@ The following Python packages are required to run DocIntel:
 
 Install these dependencies using:
 ```
-pip install pymupdf pillow pytesseract transformers python-docx torchvision pillow PyMuPDF camelot-py google openai opencv-python google-cloud-vision
+pip install pymupdf pillow pytesseract transformers python-docx torchvision pillow PyMuPDF camelot-py google openai opencv-python google-cloud-vision ghostscript
 ```
 ### **Tesseract Setup**
 To enable OCR capabilities, you will need to install Tesseract OCR. On most Linux-based systems:
 ```
 sudo apt-get install tesseract-ocr
+sudo apt-get update
+sudo apt-get install ghostscript
 ```
 
 on mac(using homebrew)
 ```
 brew install tesseract
+brew install ghostscript
 ```
 
 ## **Usage**
