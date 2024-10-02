@@ -36,10 +36,6 @@
 pip install -r requirements.txt
 ```
 
-### **Prerequisites**
-git clone https://github.com/yourusername/DocIntel.git
-cd DocIntel
-
 ### **Dependencies**
 The following Python packages are required to run DocIntel:
 - **PyMuPDF (fitz) for PDF processing**
