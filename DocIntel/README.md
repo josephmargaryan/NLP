@@ -41,9 +41,10 @@
 pip install -r requirements.txt
 ```
 
-### **Tesseract Setup**
+### **Setup**
 To enable OCR capabilities, you will need to install Tesseract OCR. On most Linux-based systems:
 ```
+pip install 'git+https://github.com/facebookresearch/detectron2.git'
 sudo apt-get update
 sudo apt-get install tesseract-ocr
 sudo apt-get install ghostscript
@@ -53,6 +54,7 @@ sudo apt install poppler-utils
 
 on mac(using homebrew)
 ```
+pip install 'git+https://github.com/facebookresearch/detectron2.git'
 brew install tesseract
 brew install ghostscript
 brew install java
