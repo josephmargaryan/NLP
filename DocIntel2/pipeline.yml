@@ -1,6 +1,0 @@
-pipeline:
-  - task: ocr
-    ocr_service: tesseract
-  - task: ml
-    model_name: deepset/roberta-base-squad2
-    task_type: question-answering
