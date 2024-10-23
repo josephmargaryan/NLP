@@ -1,29 +1,29 @@
-data_path: "/home/jmar/matching_project/data"
-source_data_extension: ".xlsx"
-target_data_extension: ".csv"
-nan_threshold: 0.9
-source_id_column: "VID"
-target_id_column: "vid__v"
+# If some of the columns are not present, just leave them as ""
+
+source_filename: "/root/similarity_matching/data/IE_HCP_NMF_BASE.xlsx"  # Full path to source file
+target_filename: "/root/similarity_matching/data/VOD_IE_Extract_for_Base_20241023.xlsx"  # Full path to target file
+nan_threshold: 0.99
+source_id_column: "RCRD_NMBR"
+target_id_column: "hcp.hcp_vid (HCP_VID)"
 
 source_address_columns:
   - "ADDR1"
   - "CITY"
-  - "ADMIN_AREA"
   - "POSTALCODE"
-  - "COUNTRY"
 
 target_address_columns:
-  - "address_line_1__v"
-  - "address_line_2__v"
-  - "locality__v"
-  - "postal_code__v"
-  - "country__v"
+  - "address.hcp_address_line1 (HCP_ADDRESS_LINE1)"
+  - "address.hcp_address_city (HCP_ADDRESS_CITY)"
+  - "address.hcp_address_postal_code (HCP_ADDRESS_POSTAL_CODE)"
 
 source_df_email: "EMAIL"
-target_df_email: "email_1__v"
+target_df_email: "hcp.hcp_email (HCP_EMAIL)"
 
 source_data_phonenumber: "PHONE"
-target_data_phonenumber: "phone_1__v"
+target_data_phonenumber: "address.hcp_address_phone (HCP_ADDRESS_PHONE)"
 
 source_df_last_name: "LAST_NAME"
-target_df_last_name: "last_name__v"
+target_df_last_name: "hcp.last_name (LAST_NAME)"
+
+source_df_first_name: "FIRST_NAME"  
+target_df_first_name: "hcp.first_name (FIRST_NAME)" 
