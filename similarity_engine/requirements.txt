@@ -1,0 +1,9 @@
+matplotlib
+numpy
+pandas 
+tqdm
+fuzzywuzzy
+sentence-transformers
+scikit-learn
+python-Levenshtein
+fuzzywuzzy
