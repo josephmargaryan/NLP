@@ -2,16 +2,16 @@ import pandas as pd
 import re
 
 class Preprocessing:
-    def __init__(self, source_filename, target_filename, nan_threshold, 
-                 source_id_column, target_id_column, source_address_columns=None, 
-                 target_address_columns=None, source_email_column=None, 
-                 target_email_column=None, source_phone_column=None, 
-                 target_phone_column=None, source_last_name_column=None, 
-                 target_last_name_column=None, source_first_name_column=None, 
-                 target_first_name_column=None, source_type_column=None, 
-                 target_type_column=None, source_subtype_column=None, 
+    def __init__(self, source_filename, target_filename, nan_threshold,
+                 source_id_column, target_id_column, source_address_columns=None,
+                 target_address_columns=None, source_email_column=None,
+                 target_email_column=None, source_phone_column=None,
+                 target_phone_column=None, source_last_name_column=None,
+                 target_last_name_column=None, source_first_name_column=None,
+                 target_first_name_column=None, source_type_column=None,
+                 target_type_column=None, source_subtype_column=None,
                  target_subtype_column=None):
-        
+
         # Store parameters
         self.source_filename = source_filename
         self.target_filename = target_filename
@@ -68,7 +68,21 @@ class Preprocessing:
             df["cleaned_address"] = df[address_columns].apply(
                 lambda row: " ".join([str(x) for x in row if pd.notnull(x)]), axis=1
             )
+            df["cleaned_address"] = df["cleaned_address"].apply(self.post_process_address)
         return df
+
+    def post_process_address(self, address):
+        """Standardize common abbreviations in the address string."""
+        replacements = {
+            r'\bsq\b': 'square',
+            r'\bst\b': 'street',
+            r'\brd\b': 'road',
+            r'\bave\b': 'avenue',
+            r'\bblvd\b': 'boulevard'
+        }
+        for pattern, replacement in replacements.items():
+            address = re.sub(pattern, replacement, address, flags=re.IGNORECASE)
+        return address
 
     def preprocess_email_column(self, df, email_column):
         if email_column in df.columns:
@@ -106,6 +120,17 @@ class Preprocessing:
             df["cleaned_first_name"] = df[first_name_column].str.lower().str.strip()
         return df
 
+    def post_process_city(self, city):
+        """Remove numbers from city names."""
+        if isinstance(city, str):
+            return re.sub(r'\d+', '', city).strip()
+        return city
+
+    def standardize_city(self, df, city_column):
+        if city_column in df.columns:
+            df["cleaned_city"] = df[city_column].apply(self.post_process_city)
+        return df
+
     def clean_type_and_subtype(self, df, type_column, subtype_column):
         if type_column in df.columns:
             df["cleaned_type"] = df[type_column].str.lower().str.strip()
@@ -141,6 +166,9 @@ class Preprocessing:
         source_df = self.standardize_first_name(source_df, self.source_first_name_column)
         target_df = self.standardize_first_name(target_df, self.target_first_name_column)
 
+        source_df = self.standardize_city(source_df, "CITY")
+        target_df = self.standardize_city(target_df, "address.hcp_address_city (HCP_ADDRESS_CITY)")
+
         source_df = self.clean_type_and_subtype(source_df, self.source_type_column, self.source_subtype_column)
         target_df = self.clean_type_and_subtype(target_df, self.target_type_column, self.target_subtype_column)
 
@@ -154,18 +182,17 @@ class Preprocessing:
 
         return source_df, target_df
 
-
 # Example Usage
-source_path = "/content/IE_HCP_NMF_BASE.xlsx"
-target_path = "/content/VOD_IE_Extract_for_Base_20241023.xlsx"
+source_path = "/root/similarity_matching/data/IE_HCP_NMF_BASE.xlsx"
+target_path = "/root/similarity_matching/data/VOD_IE_Extract_for_Base_20241023.xlsx"
 preprocessor = Preprocessing(
     source_filename=source_path,
     target_filename=target_path,
     nan_threshold=0.99,
     source_id_column="RCRD_NMBR",
     target_id_column="hcp.hcp_vid (HCP_VID)",
-    source_address_columns=["ADDR1", "CITY", "POSTALCODE"],
-    target_address_columns=["address.hcp_address_line1 (HCP_ADDRESS_LINE1)", "address.hcp_address_city (HCP_ADDRESS_CITY)", "address.hcp_address_postal_code (HCP_ADDRESS_POSTAL_CODE)"],
+    source_address_columns=["ADDR1", "CITY"],
+    target_address_columns=["address.hcp_address_line1 (HCP_ADDRESS_LINE1)", "address.hcp_address_city (HCP_ADDRESS_CITY)"],
     source_email_column="EMAIL",
     target_email_column="hcp.hcp_email (HCP_EMAIL)",
     source_phone_column="PHONE",
