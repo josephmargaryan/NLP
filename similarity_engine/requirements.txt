@@ -4,7 +4,6 @@ pandas
 tqdm
 fuzzywuzzy
 python-Levenshtein
-fuzzywuzzy
 openpyxl
 pyarrow
 fastparquet
