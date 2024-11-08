@@ -6,8 +6,8 @@ import pyarrow as pa
 
 class SimilarityMatcher:
     def __init__(self, source_df, target_df, source_id, target_id,
-                 source_columns, target_columns, source_weights,
-                 target_weights, source_rule_based, target_rule_based,
+                 source_columns, target_columns, feature_weights,
+                 source_rule_based, target_rule_based,
                  threshold, feature_threshold, output_file="results.parquet"):
 
         self.source_df = source_df
@@ -16,8 +16,7 @@ class SimilarityMatcher:
         self.target_id = target_id
         self.source_columns = source_columns
         self.target_columns = target_columns
-        self.source_weights = source_weights
-        self.target_weights = target_weights
+        self.feature_weights = feature_weights  # Custom feature weights
         self.source_rule_based = source_rule_based
         self.target_rule_based = target_rule_based
         self.threshold = threshold
@@ -48,20 +47,23 @@ class SimilarityMatcher:
                     total_weight = 0
                     similarity_scores = {}
                     feature_threshold_met = False  # Flag to ensure one feature exceeds feature threshold
-
-                    for src_col, tgt_col, src_weight, tgt_weight in zip(self.source_columns, self.target_columns, self.source_weights, self.target_weights):
+                    # Inside the match_records method, modify this section:
+                    for src_col, tgt_col, feature_weight in zip(self.source_columns, self.target_columns, self.feature_weights):
                         is_rule_based = src_col in self.source_rule_based or tgt_col in self.target_rule_based
                         similarity = self.calculate_similarity(source_row[src_col], target_row[tgt_col], rule_based=is_rule_based)
 
                         if similarity is not None:
-                            weight = (src_weight + tgt_weight) / 2
                             similarity_scores[f"{src_col}_vs_{tgt_col}"] = similarity
-                            total_similarity += similarity * weight
-                            total_weight += weight
+                            
+                            # Only add to the total similarity and weight if it's not rule-based
+                            if not is_rule_based:
+                                total_similarity += similarity * feature_weight
+                                total_weight += feature_weight
 
                             # Check if any feature's similarity score exceeds the feature threshold
                             if similarity >= self.feature_threshold:
                                 feature_threshold_met = True
+
 
                     # Calculate overall similarity score and check both thresholds
                     overall_similarity = total_similarity / total_weight if total_weight > 0 else 0
@@ -88,10 +90,10 @@ class SimilarityMatcher:
         table = pa.Table.from_pandas(match_df)
         pq.write_table(table, self.output_file)
 
-# Sample usage with feature threshold parameter
+# Sample usage with custom feature weights
 matcher = SimilarityMatcher(
     source_df=source_df,
-    target_df=filtered,
+    target_df=target_df.iloc[0:25000, :],
     source_id="id",
     target_id="id",
     source_columns=["cleaned_first_name",
@@ -104,16 +106,16 @@ matcher = SimilarityMatcher(
                     "cleaned_address",
                     "cleaned_type",
                     "cleaned_subtype"],
-    source_weights=[0.3, 0.5, 0.1, 0.5, 0.5],
-    target_weights=[0.3, 0.5, 0.1, 0.5, 0.5],
+    feature_weights=[0.1, 0.3, 0.3, 0.1, 0.2],  # Adjust weights as needed
     source_rule_based=["cleaned_phonenumber",
                        "cleaned_email"],
     target_rule_based=["cleaned_phonenumber",
                        "cleaned_email"],
-    threshold=0.6,
+    threshold=0.72,
     feature_threshold=0.85,  # Ensures at least one feature is highly similar
     output_file="results.parquet"
 )
 
 matcher.match_records()
+
 
