@@ -1,10 +1,11 @@
 matplotlib
-openpyxl
 numpy
 pandas 
 tqdm
 fuzzywuzzy
-sentence-transformers
-scikit-learn
 python-Levenshtein
 fuzzywuzzy
+openpyxl
+pyarrow
+fastparquet
+seaborn
